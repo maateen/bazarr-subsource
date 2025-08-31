@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 General Discussion
+    url: https://github.com/maateen/bazarr-subsource/discussions
+    about: Ask questions, share ideas, and discuss with the community
+  - name: 🔒 Security Issue
+    url: https://github.com/maateen/bazarr-subsource/security/advisories/new
+    about: Report a security vulnerability (private)
+  - name: 📖 Documentation
+    url: https://github.com/maateen/bazarr-subsource/blob/main/README.md
+    about: Read the documentation and setup guide
