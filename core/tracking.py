@@ -26,7 +26,7 @@ class SubtitleTracker:
             return {}
 
         try:
-            with open(self.tracking_file, "r") as f:
+            with open(self.tracking_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 logger.debug(f"Loaded tracking data: {len(data)} entries")
                 return data
@@ -37,8 +37,8 @@ class SubtitleTracker:
     def _save_tracking_data(self):
         """Save tracking data to file."""
         try:
-            with open(self.tracking_file, "w") as f:
-                json.dump(self.data, f, indent=2)
+            with open(self.tracking_file, "w", encoding="utf-8") as f:
+                json.dump(self.data, f, indent=2, ensure_ascii=False)
                 logger.debug(f"Saved tracking data: {len(self.data)} entries")
         except IOError as e:
             logger.error(f"Error saving tracking data: {e}")
@@ -68,70 +68,9 @@ class SubtitleTracker:
             lang_entry = {"language": language}
             self.data[key].append(lang_entry)
 
-        lang_entry["last_no_subtitles"] = timestamp
+        lang_entry["last_searched"] = timestamp
 
         logger.info(f"Recorded no subtitles found: {title} - {language} at {timestamp}")
-        self._save_tracking_data()
-
-    def record_subtitles_found(self, title: str, year: int, language: str, count: int):
-        """Record when subtitles are found for a movie/language."""
-        key = self._get_movie_key(title)
-        timestamp = datetime.now().isoformat()
-
-        if key not in self.data:
-            self.data[key] = []
-
-        # Find existing language entry or create new one
-        lang_entry = None
-        for entry in self.data[key]:
-            if entry.get("language") == language:
-                lang_entry = entry
-                break
-
-        if not lang_entry:
-            lang_entry = {"language": language}
-            self.data[key].append(lang_entry)
-
-        lang_entry["last_searched"] = timestamp
-        lang_entry["subtitles_found"] = count
-
-        # Remove last_searched if we found subtitles (successful search)
-        if "last_no_subtitles_found" in lang_entry:
-            del lang_entry["last_no_subtitles_found"]
-
-        logger.info(
-            f"Recorded {count} subtitles found: {title} - {language} at {timestamp}"
-        )
-        self._save_tracking_data()
-
-    def record_download_success(
-        self, title: str, year: int, language: str, filename: str
-    ):
-        """Record successful subtitle download."""
-        key = self._get_movie_key(title)
-        timestamp = datetime.now().isoformat()
-
-        if key not in self.data:
-            self.data[key] = []
-
-        # Find existing language entry or create new one
-        lang_entry = None
-        for entry in self.data[key]:
-            if entry.get("language") == language:
-                lang_entry = entry
-                break
-
-        if not lang_entry:
-            lang_entry = {"language": language}
-            self.data[key].append(lang_entry)
-
-        lang_entry["last_download_success"] = timestamp
-        lang_entry["downloaded_filename"] = filename
-
-        logger.info(
-            f"Recorded download success: {title} - {language} -> {filename} "
-            f"at {timestamp}"
-        )
         self._save_tracking_data()
 
     def record_download_failure(self, title: str, year: int, language: str, error: str):
@@ -161,29 +100,91 @@ class SubtitleTracker:
         )
         self._save_tracking_data()
 
-    def get_last_no_subtitles_timestamp(
+    def remove_successful_download(self, title: str, year: int, language: str) -> bool:
+        """
+        Remove tracking entry for successful download to clean up database.
+
+        Args:
+            title: Movie title
+            year: Movie year
+            language: Subtitle language
+
+        Returns:
+            True if entry was removed, False if not found
+        """
+        key = self._get_movie_key(title)
+        movie_data = self.data.get(key, [])
+
+        # Find and remove the language entry
+        for i, entry in enumerate(movie_data):
+            if entry.get("language") == language:
+                movie_data.pop(i)
+                logger.info(
+                    f"Removed tracking entry for successful download: "
+                    f"{title} - {language}"
+                )
+
+                # If no more language entries for this movie, remove the movie key
+                if not movie_data:
+                    del self.data[key]
+                    logger.info(f"Removed movie from tracking: {title}")
+
+                self._save_tracking_data()
+                return True
+
+        return False
+
+    def cleanup_obsolete_movies(self, current_wanted_movies: list) -> int:
+        """
+        Remove tracking entries for movies no longer in the wanted list.
+
+        Args:
+            current_wanted_movies: List of current wanted movies from Bazarr API
+
+        Returns:
+            Number of obsolete movies removed from tracking
+        """
+        if not current_wanted_movies:
+            return 0
+
+        # Create set of current wanted movie keys for fast lookup
+        current_movie_keys = set()
+        for movie in current_wanted_movies:
+            title = movie.get("title", "")
+            if title:
+                current_movie_keys.add(self._get_movie_key(title))
+
+        # Find obsolete entries
+        obsolete_keys = []
+        for movie_key in self.data.keys():
+            if movie_key not in current_movie_keys:
+                obsolete_keys.append(movie_key)
+
+        # Remove obsolete entries
+        removed_count = 0
+        for key in obsolete_keys:
+            del self.data[key]
+            removed_count += 1
+            logger.info(f"Removed obsolete tracking entry: {key}")
+
+        if removed_count > 0:
+            self._save_tracking_data()
+            logger.info(
+                f"Cleaned up {removed_count} obsolete movie(s) from tracking database"
+            )
+
+        return removed_count
+
+    def get_last_searched_timestamp(
         self, title: str, year: int, language: str
     ) -> Optional[str]:
-        """Get the last timestamp when no subtitles were found."""
+        """Get the last timestamp when subtitles were searched for."""
         key = self._get_movie_key(title)
         movie_data = self.data.get(key, [])
 
         for entry in movie_data:
             if entry.get("language") == language:
-                return entry.get("last_no_subtitles")
-
-        return None
-
-    def get_last_success_timestamp(
-        self, title: str, year: int, language: str
-    ) -> Optional[str]:
-        """Get the last timestamp when subtitles were successfully downloaded."""
-        key = self._get_movie_key(title)
-        movie_data = self.data.get(key, [])
-
-        for entry in movie_data:
-            if entry.get("language") == language:
-                return entry.get("last_download_success")
+                return entry.get("last_searched")
 
         return None
 
@@ -204,22 +205,17 @@ class SubtitleTracker:
         Returns:
             True if search should be skipped
         """
-        last_no_subs = self.get_last_no_subtitles_timestamp(title, year, language)
-        last_success = self.get_last_success_timestamp(title, year, language)
+        last_searched = self.get_last_searched_timestamp(title, year, language)
 
-        # If we have a recent success, don't skip
-        if last_success:
-            return False
-
-        # If we don't have a failure record, don't skip
-        if not last_no_subs:
+        # If we don't have a search record, don't skip
+        if not last_searched:
             return False
 
         try:
-            last_failure_time = datetime.fromisoformat(last_no_subs)
-            time_diff = datetime.now() - last_failure_time
+            last_search_time = datetime.fromisoformat(last_searched)
+            time_diff = datetime.now() - last_search_time
 
-            # Skip if failure was within the threshold
+            # Skip if search was within the threshold
             if time_diff.total_seconds() < (hours_threshold * 3600):
                 logger.info(
                     f"Skipping search for {title} ({year}) - {language} "
@@ -227,7 +223,7 @@ class SubtitleTracker:
                 )
                 return True
         except ValueError:
-            logger.warning(f"Invalid timestamp format: {last_no_subs}")
+            logger.warning(f"Invalid timestamp format: {last_searched}")
 
         return False
 

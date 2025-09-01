@@ -109,25 +109,7 @@ class TestSubtitleTracker(unittest.TestCase):
         lang_entries = self.tracker.data[key]
         self.assertEqual(len(lang_entries), 1)
         self.assertEqual(lang_entries[0]["language"], language)
-        self.assertIn("last_no_subtitles", lang_entries[0])
-
-    def test_record_download_success(self):
-        """Test recording successful subtitle download."""
-        title = "Test Movie"
-        year = 2023
-        language = "english"
-        filename = "test.srt"
-
-        self.tracker.record_download_success(title, year, language, filename)
-
-        key = self.tracker._get_movie_key(title)
-        self.assertIn(key, self.tracker.data)
-
-        lang_entries = self.tracker.data[key]
-        self.assertEqual(len(lang_entries), 1)
-        self.assertEqual(lang_entries[0]["language"], language)
-        self.assertIn("last_download_success", lang_entries[0])
-        self.assertEqual(lang_entries[0]["downloaded_filename"], filename)
+        self.assertIn("last_searched", lang_entries[0])
 
     def test_record_download_failure(self):
         """Test recording failed subtitle download."""
@@ -147,35 +129,19 @@ class TestSubtitleTracker(unittest.TestCase):
         self.assertIn("last_download_failure", lang_entries[0])
         self.assertEqual(lang_entries[0]["last_error"], error)
 
-    def test_get_last_no_subtitles_timestamp(self):
-        """Test getting last no subtitles timestamp."""
+    def test_get_last_searched_timestamp(self):
+        """Test getting last searched timestamp."""
         title = "Test Movie"
         year = 2023
         language = "english"
 
         # Test when no record exists
-        timestamp = self.tracker.get_last_no_subtitles_timestamp(title, year, language)
+        timestamp = self.tracker.get_last_searched_timestamp(title, year, language)
         self.assertIsNone(timestamp)
 
         # Add a record and test again
         self.tracker.record_no_subtitles_found(title, year, language)
-        timestamp = self.tracker.get_last_no_subtitles_timestamp(title, year, language)
-        self.assertIsNotNone(timestamp)
-
-    def test_get_last_success_timestamp(self):
-        """Test getting last success timestamp."""
-        title = "Test Movie"
-        year = 2023
-        language = "english"
-        filename = "test.srt"
-
-        # Test when no record exists
-        timestamp = self.tracker.get_last_success_timestamp(title, year, language)
-        self.assertIsNone(timestamp)
-
-        # Add a record and test again
-        self.tracker.record_download_success(title, year, language, filename)
-        timestamp = self.tracker.get_last_success_timestamp(title, year, language)
+        timestamp = self.tracker.get_last_searched_timestamp(title, year, language)
         self.assertIsNotNone(timestamp)
 
     @patch("core.tracking.datetime")
@@ -194,7 +160,7 @@ class TestSubtitleTracker(unittest.TestCase):
         failure_time = current_time - timedelta(hours=1)
         key = self.tracker._get_movie_key(title)
         self.tracker.data[key] = [
-            {"language": language, "last_no_subtitles": failure_time.isoformat()}
+            {"language": language, "last_searched": failure_time.isoformat()}
         ]
 
         # Should skip if threshold is 2 hours
@@ -203,20 +169,6 @@ class TestSubtitleTracker(unittest.TestCase):
 
         # Should not skip if threshold is 0.5 hours
         should_skip = self.tracker.should_skip_search(title, year, language, 0.5)
-        self.assertFalse(should_skip)
-
-    def test_should_skip_search_with_recent_success(self):
-        """Test should_skip_search when there's a recent success."""
-        title = "Test Movie"
-        year = 2023
-        language = "english"
-        filename = "test.srt"
-
-        # Record a recent success
-        self.tracker.record_download_success(title, year, language, filename)
-
-        # Should not skip when there's a recent success
-        should_skip = self.tracker.should_skip_search(title, year, language, 24)
         self.assertFalse(should_skip)
 
     def test_should_skip_search_no_history(self):
@@ -235,12 +187,11 @@ class TestSubtitleTracker(unittest.TestCase):
         year = 2023
         language = "english"
 
-        # Record initial failure
+        # Record initial search
         self.tracker.record_no_subtitles_found(title, year, language)
 
-        # Record success for same movie/language
-        filename = "test.srt"
-        self.tracker.record_download_success(title, year, language, filename)
+        # Record another search for same movie/language
+        self.tracker.record_no_subtitles_found(title, year, language)
 
         key = self.tracker._get_movie_key(title)
         lang_entries = self.tracker.data[key]
@@ -249,10 +200,8 @@ class TestSubtitleTracker(unittest.TestCase):
         self.assertEqual(len(lang_entries), 1)
         self.assertEqual(lang_entries[0]["language"], language)
 
-        # Should have both failure and success timestamps
-        self.assertIn("last_no_subtitles", lang_entries[0])
-        self.assertIn("last_download_success", lang_entries[0])
-        self.assertEqual(lang_entries[0]["downloaded_filename"], filename)
+        # Should have updated search timestamp
+        self.assertIn("last_searched", lang_entries[0])
 
     def test_multiple_languages_same_movie(self):
         """Test tracking multiple languages for the same movie."""
@@ -261,7 +210,7 @@ class TestSubtitleTracker(unittest.TestCase):
 
         # Record for different languages
         self.tracker.record_no_subtitles_found(title, year, "english")
-        self.tracker.record_download_success(title, year, "spanish", "spanish.srt")
+        self.tracker.record_no_subtitles_found(title, year, "spanish")
 
         key = self.tracker._get_movie_key(title)
         lang_entries = self.tracker.data[key]
@@ -272,6 +221,162 @@ class TestSubtitleTracker(unittest.TestCase):
         languages = [entry["language"] for entry in lang_entries]
         self.assertIn("english", languages)
         self.assertIn("spanish", languages)
+
+    def test_remove_successful_download(self):
+        """Test removing successful downloads from tracking."""
+        title = "Test Movie"
+        year = 2023
+        language = "english"
+
+        # Record a search first (which creates the tracking entry)
+        self.tracker.record_no_subtitles_found(title, year, language)
+
+        # Verify it exists
+        key = self.tracker._get_movie_key(title)
+        self.assertIn(key, self.tracker.data)
+
+        # Remove the successful download
+        result = self.tracker.remove_successful_download(title, year, language)
+        self.assertTrue(result)
+
+        # Verify it was removed (entire movie should be gone)
+        self.assertNotIn(key, self.tracker.data)
+
+    def test_remove_successful_download_multiple_languages(self):
+        """Test removing one language while keeping others."""
+        title = "Test Movie"
+        year = 2023
+
+        # Record searches for multiple languages
+        self.tracker.record_no_subtitles_found(title, year, "english")
+        self.tracker.record_no_subtitles_found(title, year, "spanish")
+
+        key = self.tracker._get_movie_key(title)
+        self.assertEqual(len(self.tracker.data[key]), 2)
+
+        # Remove only English
+        result = self.tracker.remove_successful_download(title, year, "english")
+        self.assertTrue(result)
+
+        # Movie should still exist with Spanish entry
+        self.assertIn(key, self.tracker.data)
+        self.assertEqual(len(self.tracker.data[key]), 1)
+        self.assertEqual(self.tracker.data[key][0]["language"], "spanish")
+
+    def test_remove_successful_download_not_found(self):
+        """Test removing non-existent entry."""
+        result = self.tracker.remove_successful_download("Nonexistent", 2023, "english")
+        self.assertFalse(result)
+
+    def test_cleanup_obsolete_movies(self):
+        """Test cleaning up obsolete movies from tracking."""
+        # Add some tracking entries
+        self.tracker.record_no_subtitles_found("Movie A", 2023, "english")
+        self.tracker.record_no_subtitles_found("Movie B", 2022, "spanish")
+        self.tracker.record_no_subtitles_found("Movie C", 2021, "french")
+
+        # Verify they exist
+        self.assertEqual(len(self.tracker.data), 3)
+
+        # Create current wanted movies list (only Movie A and Movie C)
+        current_wanted = [{"title": "Movie A"}, {"title": "Movie C"}]
+
+        # Clean up obsolete entries
+        removed_count = self.tracker.cleanup_obsolete_movies(current_wanted)
+
+        # Should have removed Movie B
+        self.assertEqual(removed_count, 1)
+        self.assertEqual(len(self.tracker.data), 2)
+
+        # Verify correct movies remain
+        remaining_keys = set(self.tracker.data.keys())
+        expected_keys = {
+            self.tracker._get_movie_key("Movie A"),
+            self.tracker._get_movie_key("Movie C"),
+        }
+        self.assertEqual(remaining_keys, expected_keys)
+
+    def test_cleanup_obsolete_movies_empty_wanted_list(self):
+        """Test cleanup with empty wanted movies list."""
+        # Add tracking entry
+        self.tracker.record_no_subtitles_found("Movie A", 2023, "english")
+        self.assertEqual(len(self.tracker.data), 1)
+
+        # Clean up with empty list
+        removed_count = self.tracker.cleanup_obsolete_movies([])
+
+        # Should not remove anything when wanted list is empty
+        self.assertEqual(removed_count, 0)
+        self.assertEqual(len(self.tracker.data), 1)
+
+    def test_cleanup_obsolete_movies_no_obsolete_entries(self):
+        """Test cleanup when no entries are obsolete."""
+        # Add tracking entries
+        self.tracker.record_no_subtitles_found("Movie A", 2023, "english")
+        self.tracker.record_no_subtitles_found("Movie B", 2022, "spanish")
+
+        # Create wanted list with all tracked movies
+        current_wanted = [{"title": "Movie A"}, {"title": "Movie B"}]
+
+        # Clean up
+        removed_count = self.tracker.cleanup_obsolete_movies(current_wanted)
+
+        # Should not remove anything
+        self.assertEqual(removed_count, 0)
+        self.assertEqual(len(self.tracker.data), 2)
+
+    def test_cleanup_obsolete_movies_all_obsolete(self):
+        """Test cleanup when all entries are obsolete."""
+        # Add tracking entries
+        self.tracker.record_no_subtitles_found("Movie A", 2023, "english")
+        self.tracker.record_no_subtitles_found("Movie B", 2022, "spanish")
+
+        # Create wanted list with different movies
+        current_wanted = [{"title": "Movie C"}, {"title": "Movie D"}]
+
+        # Clean up
+        removed_count = self.tracker.cleanup_obsolete_movies(current_wanted)
+
+        # Should remove all entries
+        self.assertEqual(removed_count, 2)
+        self.assertEqual(len(self.tracker.data), 0)
+
+    def test_unicode_handling(self):
+        """Test that Unicode characters in movie titles are properly handled."""
+        # Test with Turkish characters (dotless i, ş, ğ, ü, ç)
+        title_with_unicode = "Baskın: Türkçe Çizgi Film"
+        year = 2023
+        language = "turkish"
+
+        # Record entry with Unicode characters
+        self.tracker.record_no_subtitles_found(title_with_unicode, year, language)
+
+        # Save and reload to test file I/O
+        self.tracker._save_tracking_data()
+        self.tracker.data = {}  # Clear memory
+        self.tracker.data = self.tracker._load_tracking_data()
+
+        # Verify Unicode characters are preserved
+        key = self.tracker._get_movie_key(title_with_unicode)
+        self.assertIn(key, self.tracker.data)
+
+        # Verify the key is properly normalized (should be lowercase)
+        expected_key = "baskın: türkçe çizgi film"
+        self.assertEqual(key, expected_key)
+
+        # Test with other Unicode characters (émojis, accents, etc.)
+        titles_to_test = [
+            "Amélie",  # French accents
+            "Москва",  # Cyrillic
+            "東京物語",  # Japanese
+            "El Niño",  # Spanish
+            "Café ☕",  # With emoji
+        ]
+
+        for test_title in titles_to_test:
+            self.tracker.record_no_subtitles_found(test_title, 2023, "english")
+            key = self.tracker._get_movie_key(test_title)
+            self.assertEqual(key, test_title.lower().strip())
 
 
 if __name__ == "__main__":

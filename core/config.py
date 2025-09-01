@@ -4,6 +4,7 @@ Configuration management for Bazarr SubSource integration.
 
 import configparser
 import logging
+import logging.handlers
 import sys
 from pathlib import Path
 
@@ -108,7 +109,7 @@ def create_default_config(config_file: Path):
 
 def setup_logging(log_level: str, log_file: str):
     """
-    Setup logging configuration optimized for cron execution.
+    Setup logging configuration optimized for cron execution with rotation.
 
     Args:
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR)
@@ -121,14 +122,23 @@ def setup_logging(log_level: str, log_file: str):
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
 
-    # File handler for detailed logging
-    file_handler = logging.FileHandler(log_file)
+    # Create log directory if it doesn't exist
+    log_path = Path(log_file)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Rotating file handler - 10MB max, keep 5 old files
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"  # 10MB
+    )
     file_handler.setLevel(level)
     file_handler.setFormatter(detailed_formatter)
 
     # Configure root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
+
+    # Clear existing handlers to avoid duplicates
+    root_logger.handlers.clear()
     root_logger.addHandler(file_handler)
 
     # Suppress excessive logging from requests library for cron
