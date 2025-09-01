@@ -154,11 +154,7 @@ class SubSourceDownloader:
 
             print(f"    Found {len(formatted_subtitles)} {language} subtitle(s)")
 
-            if formatted_subtitles:
-                self.tracker.record_subtitles_found(
-                    title, year, language, len(formatted_subtitles)
-                )
-            else:
+            if not formatted_subtitles:
                 self.tracker.record_no_subtitles_found(title, year, language)
 
             return formatted_subtitles
@@ -432,9 +428,6 @@ class SubSourceDownloader:
             )
             if downloaded_file:
                 downloaded_files.append(downloaded_file)
-                self.tracker.record_download_success(
-                    title, year, lang_name.lower(), os.path.basename(downloaded_file)
-                )
                 print(f"    ✓ Downloaded {lang_name} subtitle")
             else:
                 self.tracker.record_download_failure(

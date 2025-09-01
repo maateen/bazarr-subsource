@@ -187,6 +187,26 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(urllib3_logger.level, logging.WARNING)
         self.assertEqual(requests_logger.level, logging.WARNING)
 
+    def test_setup_logging_rotation(self):
+        """Test that log rotation is properly configured."""
+        log_file = os.path.join(self.temp_dir, "test_rotation.log")
+
+        setup_logging("INFO", log_file)
+
+        # Get the root logger and check its handlers
+        root_logger = logging.getLogger()
+
+        # Should have exactly one handler (the rotating file handler)
+        self.assertEqual(len(root_logger.handlers), 1)
+
+        # Check that it's a RotatingFileHandler
+        handler = root_logger.handlers[0]
+        self.assertIsInstance(handler, logging.handlers.RotatingFileHandler)
+
+        # Check rotation settings
+        self.assertEqual(handler.maxBytes, 10 * 1024 * 1024)  # 10MB
+        self.assertEqual(handler.backupCount, 5)
+
 
 if __name__ == "__main__":
     unittest.main()

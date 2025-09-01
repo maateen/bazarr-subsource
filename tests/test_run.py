@@ -115,6 +115,7 @@ class TestRun(unittest.TestCase):
         # Mock SubSource downloader
         mock_downloader = Mock()
         mock_downloader.get_subtitle_for_movie.return_value = (["/tmp/test.srt"], 0)
+        mock_downloader.tracker.cleanup_obsolete_movies.return_value = 0
         mock_downloader_class.return_value = mock_downloader
 
         # Mock logging
@@ -255,6 +256,7 @@ class TestRun(unittest.TestCase):
         # Mock SubSource downloader
         mock_downloader = Mock()
         mock_downloader.get_subtitle_for_movie.return_value = (["/tmp/test.srt"], 0)
+        mock_downloader.tracker.cleanup_obsolete_movies.return_value = 0
         mock_downloader_class.return_value = mock_downloader
 
         # Mock logging
@@ -314,6 +316,7 @@ class TestRun(unittest.TestCase):
         # Mock SubSource downloader to return no files
         mock_downloader = Mock()
         mock_downloader.get_subtitle_for_movie.return_value = ([], 1)
+        mock_downloader.tracker.cleanup_obsolete_movies.return_value = 0
         mock_downloader_class.return_value = mock_downloader
 
         # Mock logging

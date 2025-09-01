@@ -323,8 +323,12 @@ class TestSubSourceDownloader(unittest.TestCase):
 
     @patch.object(SubSourceDownloader, "search_subtitles")
     @patch.object(SubSourceDownloader, "download_subtitle")
-    def test_get_subtitle_for_movie(self, mock_download, mock_search):
+    @patch.object(SubSourceDownloader, "_get_search_interval_hours")
+    def test_get_subtitle_for_movie(self, mock_interval, mock_download, mock_search):
         """Test getting subtitles for a movie."""
+        # Mock interval hours
+        mock_interval.return_value = 24
+
         # Mock search results
         mock_search.return_value = [
             {"id": "12345", "language": "English"},
@@ -334,21 +338,27 @@ class TestSubSourceDownloader(unittest.TestCase):
         # Mock downloads
         mock_download.side_effect = ["/path/to/sub1.srt", "/path/to/sub2.srt"]
 
-        movie = {
-            "title": "Test Movie",
-            "year": 2023,
-            "missing_subtitles": [
-                {"name": "English", "code2": "en"},
-                {"name": "English", "code2": "en"},
-            ],
-        }
+        # Mock tracker to not skip searches
+        with patch.object(
+            self.downloader.tracker, "should_skip_search", return_value=False
+        ):
+            movie = {
+                "title": "Test Movie",
+                "year": 2023,
+                "missing_subtitles": [
+                    {"name": "English", "code2": "en"},
+                    {"name": "English", "code2": "en"},
+                ],
+            }
 
-        downloaded_files, skipped_count = self.downloader.get_subtitle_for_movie(movie)
+            downloaded_files, skipped_count = self.downloader.get_subtitle_for_movie(
+                movie
+            )
 
-        self.assertEqual(len(downloaded_files), 2)
-        self.assertEqual(skipped_count, 0)
-        self.assertEqual(mock_search.call_count, 2)  # Called for each subtitle
-        self.assertEqual(mock_download.call_count, 2)
+            self.assertEqual(len(downloaded_files), 2)
+            self.assertEqual(skipped_count, 0)
+            self.assertEqual(mock_search.call_count, 2)  # Called for each subtitle
+            self.assertEqual(mock_download.call_count, 2)
 
     @patch.object(SubSourceDownloader, "_get_search_interval_hours")
     def test_get_subtitle_for_movie_with_tracking(self, mock_interval):

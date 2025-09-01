@@ -109,6 +109,13 @@ def main():
         )
 
         print(f"Download directory: {config['download_directory']}")
+
+        # Clean up obsolete tracking entries
+        print("Cleaning up obsolete tracking entries...")
+        removed_count = downloader.tracker.cleanup_obsolete_movies(movies)
+        if removed_count > 0:
+            print(f"Removed {removed_count} obsolete movie(s) from tracking database")
+
         print("\nStarting subtitle downloads...")
         print("=" * 50)
 
@@ -152,7 +159,15 @@ def main():
                     ):
                         successful_uploads += 1
 
-                        # Optional: Remove local file after successful upload
+                        # Clean up tracking database for successful download
+                        title = movie.get("title", "Unknown")
+                        year = movie.get("year", 0)
+                        lang_name = sub_info.get("name", "Unknown")
+                        downloader.tracker.remove_successful_download(
+                            title, year, lang_name.lower()
+                        )
+
+                        # Remove local file after successful upload
                         try:
                             os.remove(subtitle_file)
                             print(f"    Cleaned up local file: {subtitle_file}")
