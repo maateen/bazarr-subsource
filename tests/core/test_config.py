@@ -39,7 +39,15 @@ class TestConfig(unittest.TestCase):
         config.read(self.config_file)
 
         # Check all required sections exist
-        expected_sections = ["bazarr", "auth", "subsource", "download", "logging"]
+        expected_sections = [
+            "bazarr",
+            "auth",
+            "subsource",
+            "download",
+            "movies",
+            "episodes",
+            "logging",
+        ]
         for section in expected_sections:
             self.assertIn(section, config.sections())
 
@@ -108,6 +116,9 @@ class TestConfig(unittest.TestCase):
             "password",
             "subsource_api_url",
             "download_directory",
+            "movies_enabled",
+            "episodes_enabled",
+            "episodes_search_patterns",
             "log_level",
             "log_file",
         ]
@@ -206,6 +217,27 @@ class TestConfig(unittest.TestCase):
         # Check rotation settings
         self.assertEqual(handler.maxBytes, 10 * 1024 * 1024)  # 10MB
         self.assertEqual(handler.backupCount, 5)
+
+    def test_episode_configuration_defaults(self):
+        """Test that episode configuration has proper defaults."""
+        # Create basic config without episode section
+        config = configparser.ConfigParser()
+        config["bazarr"] = {"url": "http://test", "api_key": "test"}
+        config["auth"] = {"username": "test", "password": "test"}
+        config["subsource"] = {"api_url": "http://test"}
+        config["download"] = {"directory": "/tmp"}
+        config["logging"] = {"level": "INFO", "file": "test.log"}
+
+        # Test fallback values for episodes
+        episodes_enabled = config.getboolean("episodes", "enabled", fallback=True)
+        episodes_patterns = config.get(
+            "episodes",
+            "search_patterns",
+            fallback="season_episode,episode_title,scene_name",
+        )
+
+        self.assertTrue(episodes_enabled)  # Default should be True
+        self.assertEqual(episodes_patterns, "season_episode,episode_title,scene_name")
 
 
 if __name__ == "__main__":
