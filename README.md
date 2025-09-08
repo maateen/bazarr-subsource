@@ -7,11 +7,12 @@
 
 > ⚠️ **Active Development**: This project is under active development. Features may change and stability is not guaranteed. Use at your own risk.
 
-A Python automation tool that connects to your Bazarr instance, identifies movies missing subtitles, and automatically downloads them from SubSource.
+A Python automation tool that connects to your Bazarr instance, identifies movies and TV episodes missing subtitles, and automatically downloads them from SubSource.
 
 ## Features
 
 - 🎬 **Automatic Movie Detection**: Lists all movies missing subtitles from your Bazarr instance
+- 📺 **TV Show Episode Support**: Automatically downloads subtitles for wanted TV show episodes
 - 🌐 **SubSource Integration**: Downloads subtitles from SubSource's anonymous API (no account needed)
 - 📤 **Seamless Upload**: Automatically uploads downloaded subtitles back to Bazarr
 - 🌍 **Multi-language Support**: Supports multiple languages, forced, and hearing impaired subtitles
@@ -19,6 +20,7 @@ A Python automation tool that connects to your Bazarr instance, identifies movie
 - 📊 **Progress Tracking**: Tracks search history to prevent unnecessary duplicate searches
 - 🧹 **Clean Operation**: Automatically cleans up temporary files after successful uploads
 - ⚙️ **Configurable**: External configuration file for easy setup
+- 🔧 **Episode Matching**: Intelligent episode matching using season/episode patterns and scene names
 
 ## Requirements
 
@@ -62,6 +64,16 @@ A Python automation tool that connects to your Bazarr instance, identifies movie
 
    [download]
    directory = /tmp/downloaded_subtitles
+
+   [movies]
+   # Enable movie subtitle downloads
+   enabled = true
+
+   [episodes]
+   # Enable TV show episode subtitle downloads
+   enabled = true
+   # Search patterns: season_episode,episode_title,scene_name
+   search_patterns = season_episode,episode_title,scene_name
 
    [logging]
    level = INFO
@@ -143,18 +155,41 @@ The tool's built-in tracking system prevents redundant searches, making frequent
 ### Download Settings
 - `directory`: Local directory for temporary subtitle files (default: `/tmp/downloaded_subtitles`)
 
+### Movies Settings
+- `enabled`: Enable movie subtitle downloads (default: `true`)
+
+### Episodes Settings
+- `enabled`: Enable TV show episode subtitle downloads (default: `true`)
+- `search_patterns`: Episode search patterns, comma-separated (default: `season_episode,episode_title,scene_name`)
+  - `season_episode`: Search using "Series S01E01" format
+  - `episode_title`: Search using "Series Episode Title" format
+  - `scene_name`: Search using scene release names
+
 ### Logging
 - `level`: Log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`)
 - `file`: Log file path (default: `/var/log/bazarr_subsource.log`)
+- Log rotation: 10MB max file size, keeps 5 backup files
 
 ## How It Works
 
+### Movies
 1. **Connect to Bazarr**: Fetches all movies missing subtitles using the `/api/movies/wanted` endpoint
 2. **Search SubSource**: For each movie, searches SubSource API for available subtitles
 3. **Smart Filtering**: Uses Bazarr's own search intervals to avoid redundant searches
 4. **Download Process**: Downloads subtitle ZIP files and extracts the subtitle files
 5. **Upload to Bazarr**: Uploads extracted subtitles back to Bazarr using the `/api/movies/subtitles` endpoint
 6. **Cleanup**: Removes temporary files and updates tracking data
+
+### TV Show Episodes
+1. **Connect to Bazarr**: Fetches all episodes missing subtitles using the `/api/episodes/wanted` endpoint
+2. **Episode Enrichment**: Retrieves series information for each episode from `/api/series`
+3. **Multi-Pattern Search**: Searches SubSource using various patterns:
+   - Series name + S01E01 format
+   - Series name + episode title
+   - Scene release names
+4. **Episode Matching**: Filters SubSource results to match specific season/episode using regex patterns
+5. **Upload to Bazarr**: Uploads matched subtitles using the `/api/episodes/subtitles` endpoint
+6. **Cleanup**: Removes temporary files and updates episode tracking data
 
 ## Advanced Features
 
@@ -253,17 +288,19 @@ bazarr-subsource/
 
 SubSource's anonymous API has rate limits. This tool implements:
 - 2-second delays between API calls
-- Intelligent retry logic based on Bazarr's intervals
+- Intelligent retry logic based on Bazarr's intervals for both movies and episodes
 - Local tracking to minimize unnecessary requests
+- Episode-specific search patterns to reduce API calls
 - No authentication headers or account credentials needed
 
 ## Troubleshooting
 
 ### Common Issues
 
-**"No movies are currently missing subtitles!"**
-- Check if your Bazarr has movies with missing subtitles
+**"No movies are currently missing subtitles!" / "No episodes want subtitles."**
+- Check if your Bazarr has movies/episodes with missing subtitles
 - Verify your Bazarr API key and URL are correct
+- For episodes: Ensure `episodes_enabled = true` in your config
 
 **"Error connecting to Bazarr API"**
 - Ensure Bazarr is running and accessible
@@ -278,6 +315,12 @@ SubSource's anonymous API has rate limits. This tool implements:
 **Configuration file not found**
 - The tool creates a default config on first run
 - Edit `~/.config/bazarr-subsource/config.cfg` with your settings
+
+**Episode subtitles not found**
+- Episodes are searched using multiple patterns (S01E01, episode title, scene name)
+- SubSource has limited TV show coverage compared to movies
+- Check if the series name matches exactly in both Bazarr and SubSource
+- Some episodes may not have subtitles available on SubSource
 
 **Cron job not running or failing**
 - Check cron service is running: `sudo systemctl status cron`
