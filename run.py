@@ -36,7 +36,7 @@ import time
 from api.bazarr import Bazarr
 from api.subsource import SubSourceDownloader
 from core.config import load_config, setup_logging
-from utils import format_movie_info
+from utils import format_movie_info, format_episode_info
 
 # Logging will be configured after loading config
 logger = None
@@ -49,6 +49,8 @@ def main():
     try:
         # Load configuration first
         config = load_config()
+        movies_enabled = config.get("movies_enabled", True)
+        episodes_enabled = config.get("episodes_enabled", True)
 
         # Setup logging
         setup_logging(config["log_level"], config["log_file"])
@@ -59,11 +61,12 @@ def main():
         logger.info("Starting Bazarr SubSource execution")
         logger.info("=" * 60)
 
-        print("Bazarr Wanted Movies - SubSource Downloader")
+        print("Bazarr SubSource Integration Tool")
         print("=" * 50)
 
-        print(f"Connecting to Bazarr at: {config['bazarr_url']}")
-        print("Fetching wanted movies...", end=" ", flush=True)
+        print(
+            f"Connecting to Bazarr at: {config['bazarr_url']}...", end=" ", flush=True
+        )
 
         # Initialize Bazarr client
         bazarr = Bazarr(
@@ -73,9 +76,78 @@ def main():
             config["password"],
         )
 
+        # Test connection and get settings
+        try:
+            sync_settings = bazarr.get_sync_settings()
+            subzero_settings = bazarr.get_subzero_settings()
+            print("✓ Connected")
+        except Exception as e:
+            print("✗ Connection failed")
+            logger.error(f"Failed to connect to Bazarr: {e}")
+            raise
+
+        print("\nBazarr Configuration:")
+        print("-" * 20)
+
+        # SubSync settings
+        if sync_settings["enabled"]:
+            print("✓ SubSync: Enabled")
+            print(f"  • Max Offset Seconds: {sync_settings['max_offset_seconds']}s")
+            print(
+                f"  • Golden-Section Search: {'Yes' if sync_settings['use_gss'] else 'No'}"
+            )
+            print(
+                f"  • No Fix Framerate: {'Yes' if sync_settings['no_fix_framerate'] else 'No'}"
+            )
+        else:
+            print("✗ SubSync: Disabled")
+
+        # Sub-Zero settings
+        if subzero_settings["enabled"]:
+            print("✓ Sub-Zero: Enabled")
+            print(
+                f"  • Common Fixes: {'Yes' if 'common' in subzero_settings['mods'] else 'No'}"
+            )
+            print(
+                f"  • Remove Tags: {'Yes' if 'remove_tags' in subzero_settings['mods'] else 'No'}"
+            )
+            print(
+                f"  • OCR Fixes: {'Yes' if 'OCR_fixes' in subzero_settings['mods'] else 'No'}"
+            )
+            print(
+                f"  • Fix Uppercase: {'Yes' if 'fix_uppercase' in subzero_settings['mods'] else 'No'}"
+            )
+            print(
+                f"  • Remove HI: {'Yes' if 'remove_HI' in subzero_settings['mods'] else 'No'}"
+            )
+        else:
+            print("✗ Sub-Zero: Disabled")
+
+        # Initialize SubSource downloader (needed for both movies and episodes)
+        downloader = None
+        if movies_enabled or episodes_enabled:
+            print("\nInitializing SubSource downloader...")
+            downloader = SubSourceDownloader(
+                config["subsource_api_url"],
+                config["download_directory"],
+                bazarr,  # Pass Bazarr client for API calls
+            )
+            print(f"Download directory: {config['download_directory']}")
+            print("✓ SubSource downloader initialized")
+
         # Process movies if enabled
         movies = []
-        if config.get("movies_enabled", True):
+        total_downloads = 0
+        successful_uploads = 0
+        subtitles_skipped = 0
+
+        print("\n" + "=" * 50)
+        print("PROCESSING MOVIES")
+        print("=" * 50)
+
+        if movies_enabled:
+            print("Fetching wanted movies from Bazarr...", end=" ", flush=True)
+
             # Fetch wanted movies
             data = bazarr.get_wanted_movies()
             if data is None:
@@ -94,46 +166,27 @@ def main():
         # Continue with movie processing if we have movies
         if movies:
             print("\nWanted Movies:")
-            print("-" * 40)
 
             # Display each movie
             for movie in movies:
                 print(format_movie_info(movie))
 
-            print(f"\nTotal: {len(movies)} movies need subtitles")
+            print(f"\nTotal: {len(movies)} movies need subtitles\n")
 
-            # Automatically proceed with downloading subtitles
-            print("\n" + "=" * 50)
-            print("Automatically downloading missing subtitles from SubSource...")
-
-            # Initialize SubSource downloader
-            print("\nInitializing SubSource downloader...")
-            downloader = SubSourceDownloader(
-                config["subsource_api_url"],
-                config["download_directory"],
-                bazarr,  # Pass Bazarr client for API calls
-            )
-
-            print(f"Download directory: {config['download_directory']}")
+            # Movie subtitle downloads
+            print("Downloading missing movie subtitles:")
+            print("-" * 40)
 
             # Clean up obsolete tracking entries
-            print("Cleaning up obsolete tracking entries...")
+            print("Cleaning up obsolete movie tracking entries...")
             removed_count = downloader.tracker.cleanup_obsolete_movies(movies)
             if removed_count > 0:
                 print(
                     f"Removed {removed_count} obsolete movie(s) from tracking database"
                 )
 
-            print("\nStarting subtitle downloads...")
-            print("=" * 50)
+            print("\nStarting movie subtitle downloads...")
 
-        # Initialize counters (outside if block for summary)
-        total_downloads = 0
-        successful_uploads = 0
-        subtitles_skipped = 0
-
-        # Process movies if we have them
-        if movies:
             # Process each movie
             for i, movie in enumerate(movies, 1):
                 print(f"\n[{i}/{len(movies)}] Processing movie:")
@@ -167,10 +220,61 @@ def main():
                         forced = sub_info.get("forced", False)
                         hi = sub_info.get("hi", False)
 
-                        if bazarr.upload_subtitle_to_bazarr(
+                        if bazarr.upload_movie_subtitle(
                             radarr_id, subtitle_file, lang_code, forced, hi
                         ):
                             successful_uploads += 1
+
+                            # Get movie details to find subtitle path for post-processing
+                            movie_data = bazarr.get_movie_subtitles(radarr_id)
+                            if movie_data and "subtitles" in movie_data:
+                                # Find the subtitle we just uploaded
+                                for subtitle in movie_data["subtitles"]:
+                                    if (
+                                        subtitle.get("code2") == lang_code
+                                        and subtitle.get("forced") == forced
+                                        and subtitle.get("hi") == hi
+                                    ):
+                                        subtitle_path = subtitle.get("path")
+                                        if subtitle_path:
+                                            # Apply Sub-Zero modifications if enabled
+                                            if subzero_settings["enabled"]:
+                                                print(
+                                                    "    Applying Sub-Zero modifications..."
+                                                )
+                                                bazarr.trigger_subzero_mods(
+                                                    subtitle_path=subtitle_path,
+                                                    media_type="movie",
+                                                    media_id=radarr_id,
+                                                    language=lang_code,
+                                                    forced=forced,
+                                                    hi=hi,
+                                                )
+
+                                            # Perform subtitle synchronization if enabled
+                                            if sync_settings["enabled"]:
+                                                print(
+                                                    "    Performing subtitle synchronization..."
+                                                )
+                                                bazarr.sync_subtitle(
+                                                    subtitle_path=subtitle_path,
+                                                    media_type="movie",
+                                                    media_id=radarr_id,
+                                                    language=lang_code,
+                                                    forced=forced,
+                                                    hi=hi,
+                                                    reference=sync_settings[
+                                                        "reference"
+                                                    ],
+                                                    max_offset_seconds=sync_settings[
+                                                        "max_offset_seconds"
+                                                    ],
+                                                    no_fix_framerate=sync_settings[
+                                                        "no_fix_framerate"
+                                                    ],
+                                                    use_gss=sync_settings["use_gss"],
+                                                )
+                                        break
 
                             # Clean up tracking database for successful download
                             title = movie.get("title", "Unknown")
@@ -191,120 +295,162 @@ def main():
                 if i < len(movies):
                     time.sleep(1)
 
-        # Process TV show episodes if enabled
+        # Process TV series episodes if enabled
+        episodes = []
         episodes_processed = 0
         episodes_downloads = 0
         episodes_uploads = 0
         episodes_skipped = 0
 
-        if config.get("episodes_enabled", True):
+        if episodes_enabled:
             print("\n" + "=" * 50)
-            print("PROCESSING TV SHOW EPISODES")
+            print("PROCESSING TV SERIES")
             print("=" * 50)
+            print("Fetching wanted episodes from Bazarr...", end=" ", flush=True)
 
-            from api.bazarr_episodes import BazarrEpisodeClient
-            from api.tv_shows import TVShowSubSourceDownloader
+            # Fetch wanted episodes
+            episodes = bazarr.get_wanted_episodes()
+            print(f"Done!\nFound {len(episodes)} wanted episodes")
+        else:
+            print("TV Series processing disabled in configuration.")
 
-            # Initialize episode clients
-            episode_client = BazarrEpisodeClient(
-                config["bazarr_url"],
-                config["api_key"],
-                config["username"],
-                config["password"],
-            )
+        # Continue with tv series processing if we have tv series
+        if episodes:
+            print("\nWanted Episodes:")
 
-            tv_downloader = TVShowSubSourceDownloader(
-                config["subsource_api_url"],
-                config["download_directory"],
-                episode_client,
-            )
+            # Display each episode
+            for episode in episodes:
+                print(format_episode_info(episode))
 
-            # Get wanted episodes
-            episodes = episode_client.get_wanted_episodes()
-            episodes_processed = len(episodes)
+            print(f"\nTotal: {len(episodes)} episodes need subtitles\n")
 
-            if not episodes:
-                print("No episodes want subtitles.")
-            else:
-                print(f"Found {len(episodes)} episode(s) wanting subtitles")
+            # TV series subtitle downloads
+            print("Downloading missing TV series subtitles:")
+            print("-" * 40)
 
-                # Clean up obsolete episode tracking entries
-                print("Cleaning up obsolete episode tracking entries...")
-                removed_count = tv_downloader.tracker.cleanup_obsolete_movies(episodes)
-                if removed_count > 0:
-                    print(
-                        f"Removed {removed_count} obsolete episode(s) "
-                        f"from tracking database"
+            # Clean up obsolete episode tracking entries
+            print("Cleaning up obsolete episode tracking entries...")
+            removed_count = downloader.tracker.cleanup_obsolete_movies(episodes)
+            if removed_count > 0:
+                print(
+                    f"Removed {removed_count} obsolete episode(s) "
+                    f"from tracking database"
+                )
+
+            print("\nStarting episode subtitle downloads...")
+
+            for i, episode in enumerate(episodes, 1):
+                print(f"\n[{i}/{len(episodes)}]", end=" ")
+
+                # Download subtitles for this episode
+                downloaded_files, skipped_count = downloader.get_subtitle_for_episode(
+                    episode
+                )
+                episodes_downloads += len(downloaded_files)
+                episodes_skipped += skipped_count
+
+                # Upload each downloaded subtitle to Bazarr
+                for subtitle_file in downloaded_files:
+                    # Extract subtitle info from the episode and file
+                    series_id = episode.get("sonarrSeriesId") or episode.get("seriesId")
+                    episode_id = episode.get("sonarrEpisodeId") or episode.get(
+                        "episodeId"
                     )
 
-                for i, episode in enumerate(episodes, 1):
-                    print(f"\n[{i}/{len(episodes)}] Processing episode...")
+                    # Determine language from filename or default to first
+                    # missing subtitle
+                    missing_subs = episode.get("missing_subtitles", [])
+                    if missing_subs:
+                        lang_code = missing_subs[0].get("code2", "en")
+                        lang_name = missing_subs[0].get("name", "Unknown")
+                    else:
+                        lang_code = "en"
+                        lang_name = "English"
 
-                    # Download subtitles for this episode
-                    downloaded_files, skipped_count = (
-                        tv_downloader.get_subtitle_for_episode(episode)
-                    )
-                    episodes_downloads += len(downloaded_files)
-                    episodes_skipped += skipped_count
+                    if series_id and episode_id:
+                        sub_info = {"name": lang_name, "code2": lang_code}
 
-                    # Upload each downloaded subtitle to Bazarr
-                    for subtitle_file in downloaded_files:
-                        # Extract subtitle info from the episode and file
-                        series_id = episode.get("sonarrSeriesId") or episode.get(
-                            "seriesId"
-                        )
-                        episode_id = episode.get("sonarrEpisodeId") or episode.get(
-                            "episodeId"
-                        )
+                        # Upload to Bazarr
+                        if bazarr.upload_episode_subtitle(
+                            series_id, episode_id, lang_code, subtitle_file
+                        ):
+                            episodes_uploads += 1
+                            print(f"    ✓ Uploaded {lang_name} subtitle to Bazarr")
 
-                        # Determine language from filename or default to first
-                        # missing subtitle
-                        missing_subs = episode.get("missing_subtitles", [])
-                        if missing_subs:
-                            lang_code = missing_subs[0].get("code2", "en")
-                            lang_name = missing_subs[0].get("name", "Unknown")
+                            # Get episode details to find subtitle path for post-processing
+                            episode_data = bazarr.get_episode_subtitles(
+                                series_id, episode_id
+                            )
+                            if episode_data and "subtitles" in episode_data:
+                                # Find the subtitle we just uploaded
+                                for subtitle in episode_data["subtitles"]:
+                                    if subtitle.get("code2") == lang_code:
+                                        subtitle_path = subtitle.get("path")
+                                        if subtitle_path:
+                                            # Apply Sub-Zero modifications if enabled
+                                            if subzero_settings["enabled"]:
+                                                print(
+                                                    "    Applying Sub-Zero modifications..."
+                                                )
+                                                bazarr.trigger_episode_subzero_mods(
+                                                    subtitle_path=subtitle_path,
+                                                    series_id=series_id,
+                                                    episode_id=episode_id,
+                                                    language=lang_code,
+                                                    forced=False,
+                                                    hi=False,
+                                                )
+
+                                            # Perform episode subtitle synchronization if enabled
+                                            if sync_settings["enabled"]:
+                                                print(
+                                                    "    Performing episode subtitle synchronization..."
+                                                )
+                                                bazarr.sync_episode_subtitle(
+                                                    subtitle_path=subtitle_path,
+                                                    series_id=series_id,
+                                                    episode_id=episode_id,
+                                                    language=lang_code,
+                                                    reference=sync_settings[
+                                                        "reference"
+                                                    ],
+                                                    max_offset_seconds=sync_settings[
+                                                        "max_offset_seconds"
+                                                    ],
+                                                    no_fix_framerate=sync_settings[
+                                                        "no_fix_framerate"
+                                                    ],
+                                                    use_gss=sync_settings["use_gss"],
+                                                )
+                                        break
+
+                            # Clean up tracking database for successful download
+                            series_title = episode.get("seriesTitle", "Unknown")
+                            season = episode.get("season", 0)
+                            episode_num = episode.get("episode", 0)
+                            episode_key = (
+                                f"{series_title}:S{season:02d}E{episode_num:02d}"
+                            )
+                            downloader.tracker.remove_successful_download(
+                                episode_key, 0, lang_name.lower()
+                            )
+
+                            # Remove local file after successful upload
+                            try:
+                                os.remove(subtitle_file)
+                                print(f"    Cleaned up local file: {subtitle_file}")
+                            except OSError:
+                                pass
                         else:
-                            lang_code = "en"
-                            lang_name = "English"
+                            print(
+                                f"    ✗ Failed to upload {lang_name} subtitle to Bazarr"
+                            )
+                    else:
+                        print("    ✗ Missing series_id or episode_id for upload")
 
-                        if series_id and episode_id:
-                            sub_info = {"name": lang_name, "code2": lang_code}
-
-                            # Upload to Bazarr
-                            if episode_client.upload_episode_subtitle(
-                                series_id, episode_id, lang_code, subtitle_file
-                            ):
-                                episodes_uploads += 1
-                                print(f"    ✓ Uploaded {lang_name} subtitle to Bazarr")
-
-                                # Clean up tracking database for successful download
-                                series_title = episode.get("seriesTitle", "Unknown")
-                                season = episode.get("season", 0)
-                                episode_num = episode.get("episode", 0)
-                                episode_key = (
-                                    f"{series_title}:S{season:02d}E{episode_num:02d}"
-                                )
-                                tv_downloader.tracker.remove_successful_download(
-                                    episode_key, 0, lang_name.lower()
-                                )
-
-                                # Remove local file after successful upload
-                                try:
-                                    os.remove(subtitle_file)
-                                    print(f"    Cleaned up local file: {subtitle_file}")
-                                except OSError:
-                                    pass
-                            else:
-                                print(
-                                    f"    ✗ Failed to upload {lang_name} "
-                                    f"subtitle to Bazarr"
-                                )
-                        else:
-                            print("    ✗ Missing series_id or episode_id for upload")
-
-                    # Small delay between episodes
-                    if i < len(episodes):
-                        time.sleep(1)
+                # Small delay between episodes
+                if i < len(episodes):
+                    time.sleep(1)
 
         # Summary
         print("\n" + "=" * 50)

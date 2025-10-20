@@ -12,9 +12,10 @@ A Python automation tool that connects to your Bazarr instance, identifies movie
 ## Features
 
 - 🎬 **Automatic Movie Detection**: Lists all movies missing subtitles from your Bazarr instance
-- 📺 **TV Show Episode Support**: Automatically downloads subtitles for wanted TV show episodes
+- 📺 **TV Series Episode Support**: Automatically downloads subtitles for wanted TV series episodes
 - 🌐 **SubSource Integration**: Downloads subtitles from SubSource's anonymous API (no account needed)
 - 📤 **Seamless Upload**: Automatically uploads downloaded subtitles back to Bazarr
+- 🔄 **Automatic Synchronization**: Built-in subtitle sync with configurable parameters (No Framerate Fix, GSS, etc.)
 - 🌍 **Multi-language Support**: Supports multiple languages, forced, and hearing impaired subtitles
 - ⏱️ **Smart Retry Logic**: Uses Bazarr's own search intervals to avoid redundant API calls
 - 📊 **Progress Tracking**: Tracks search history to prevent unnecessary duplicate searches
@@ -70,10 +71,11 @@ A Python automation tool that connects to your Bazarr instance, identifies movie
    enabled = true
 
    [episodes]
-   # Enable TV show episode subtitle downloads
+   # Enable TV series episode subtitle downloads
    enabled = true
    # Search patterns: season_episode,episode_title,scene_name
    search_patterns = season_episode,episode_title,scene_name
+
 
    [logging]
    level = INFO
@@ -159,7 +161,7 @@ The tool's built-in tracking system prevents redundant searches, making frequent
 - `enabled`: Enable movie subtitle downloads (default: `true`)
 
 ### Episodes Settings
-- `enabled`: Enable TV show episode subtitle downloads (default: `true`)
+- `enabled`: Enable TV series episode subtitle downloads (default: `true`)
 - `search_patterns`: Episode search patterns, comma-separated (default: `season_episode,episode_title,scene_name`)
   - `season_episode`: Search using "Series S01E01" format
   - `episode_title`: Search using "Series Episode Title" format
@@ -180,7 +182,7 @@ The tool's built-in tracking system prevents redundant searches, making frequent
 5. **Upload to Bazarr**: Uploads extracted subtitles back to Bazarr using the `/api/movies/subtitles` endpoint
 6. **Cleanup**: Removes temporary files and updates tracking data
 
-### TV Show Episodes
+### TV Series Episodes
 1. **Connect to Bazarr**: Fetches all episodes missing subtitles using the `/api/episodes/wanted` endpoint
 2. **Episode Enrichment**: Retrieves series information for each episode from `/api/series`
 3. **Multi-Pattern Search**: Searches SubSource using various patterns:
@@ -192,6 +194,60 @@ The tool's built-in tracking system prevents redundant searches, making frequent
 6. **Cleanup**: Removes temporary files and updates episode tracking data
 
 ## Advanced Features
+
+### Automatic Subtitle Synchronization
+The tool uses Bazarr's built-in SubSync functionality for subtitle synchronization:
+
+#### Features
+- **Conditional Sync**: Automatically synchronizes subtitles only if SubSync is enabled in Bazarr
+- **Uses Bazarr Settings**: Reads sync parameters directly from your Bazarr configuration
+- **Audio/Video Reference**: Uses first audio track as reference for sync
+- **Framerate Handling**: Respects your Bazarr SubSync framerate settings
+- **Advanced Algorithms**: Uses Golden-Section Search (GSS) if enabled in Bazarr
+
+#### How It Works
+1. **Check SubSync Status**: Tool reads your Bazarr's SubSync settings via `/api/system/settings`
+2. **Upload**: Subtitle is uploaded to Bazarr successfully
+3. **Conditional Sync**: If SubSync is enabled in Bazarr, synchronization is performed
+4. **Retrieve Path**: Gets the server-side subtitle file path from Bazarr
+5. **Synchronize**: Calls Bazarr's `/api/subtitles` PATCH endpoint with your configured parameters
+6. **Verification**: Confirms successful synchronization before cleanup
+
+#### SubSync Configuration
+No configuration needed in this tool! SubSync settings are automatically retrieved from your Bazarr instance:
+- Enable/disable SubSync in Bazarr Settings → Subtitles → SubSync
+- Configure `max_offset_seconds`, `no_fix_framerate`, and `gss` settings in Bazarr
+- Tool automatically uses your Bazarr SubSync preferences
+
+**Note**: If SubSync is disabled in Bazarr, subtitles will be uploaded without synchronization.
+
+### Sub-Zero Subtitle Content Modifications
+The tool displays your Bazarr Sub-Zero configuration for subtitle content modifications:
+
+#### Features
+- **Automatic Detection**: Reads Sub-Zero modification settings from Bazarr
+- **Modification Display**: Shows which Sub-Zero mods are active
+- **No Configuration Required**: Uses your existing Bazarr Sub-Zero settings
+
+#### How It Works
+1. **Read Settings**: Tool fetches Sub-Zero configuration from `/api/system/settings`
+2. **Display Status**: Shows whether Sub-Zero mods are enabled and which ones are active
+3. **Automatic Triggering**: After successful subtitle upload, triggers Sub-Zero modifications if enabled
+4. **Post-Processing**: Sub-Zero mods are applied before subtitle synchronization
+
+#### Common Sub-Zero Modifications
+Based on your Bazarr configuration, common modifications include:
+- **common**: Basic fixes (OCR errors, formatting, color tags)
+- **hearing_impaired**: Hearing impaired content processing
+- **ocr**: Advanced OCR error correction
+- **fps**: Frame rate conversion fixes
+
+#### Processing Order
+After successful subtitle upload to Bazarr:
+1. **Sub-Zero Modifications** (if enabled): Applied first to improve subtitle quality
+2. **SubSync** (if enabled): Applied second to synchronize timing
+
+This ensures subtitles are properly cleaned up before timing synchronization.
 
 ### Intelligent Retry Logic
 The tool integrates with Bazarr's system tasks to determine optimal search intervals:
@@ -318,7 +374,7 @@ SubSource's anonymous API has rate limits. This tool implements:
 
 **Episode subtitles not found**
 - Episodes are searched using multiple patterns (S01E01, episode title, scene name)
-- SubSource has limited TV show coverage compared to movies
+- SubSource has limited TV series coverage compared to movies
 - Check if the series name matches exactly in both Bazarr and SubSource
 - Some episodes may not have subtitles available on SubSource
 
