@@ -107,7 +107,7 @@ class TestBazarr(unittest.TestCase):
         mock_basename.return_value = "test.srt"
         mock_open.return_value.__enter__.return_value = Mock()
 
-        result = self.client.upload_subtitle_to_bazarr(
+        result = self.client.upload_movie_subtitle(
             radarr_id=123,
             subtitle_file="/path/to/test.srt",
             language="en",
@@ -139,7 +139,7 @@ class TestBazarr(unittest.TestCase):
         mock_basename.return_value = "test.srt"
         mock_open.return_value.__enter__.return_value = Mock()
 
-        result = self.client.upload_subtitle_to_bazarr(
+        result = self.client.upload_movie_subtitle(
             radarr_id=123, subtitle_file="/path/to/test.srt", language="en"
         )
 
@@ -148,7 +148,7 @@ class TestBazarr(unittest.TestCase):
     @patch("builtins.open", side_effect=IOError("File not found"))
     def test_upload_subtitle_file_error(self, mock_open):
         """Test subtitle upload handles file errors."""
-        result = self.client.upload_subtitle_to_bazarr(
+        result = self.client.upload_movie_subtitle(
             radarr_id=123, subtitle_file="/invalid/path/test.srt", language="en"
         )
 
@@ -253,6 +253,518 @@ class TestBazarr(unittest.TestCase):
         """Test parsing invalid format raises ValueError."""
         with self.assertRaises(ValueError):
             self.client._parse_interval_to_minutes("invalid format")
+
+    @patch("api.bazarr.requests.Session.patch")
+    def test_sync_subtitle_success(self, mock_patch):
+        """Test successful subtitle synchronization."""
+        mock_response = Mock()
+        mock_response.raise_for_status.return_value = None
+        mock_patch.return_value = mock_response
+
+        result = self.client.sync_subtitle(
+            subtitle_path="/path/to/subtitle.srt",
+            media_type="movie",
+            media_id=123,
+            language="en",
+            forced=False,
+            hi=False,
+        )
+
+        self.assertTrue(result)
+        mock_patch.assert_called_once()
+
+        # Check the call parameters
+        call_args = mock_patch.call_args
+        self.assertIn("params", call_args.kwargs)
+        params = call_args.kwargs["params"]
+        self.assertEqual(params["action"], "sync")
+        self.assertEqual(params["language"], "en")
+        self.assertEqual(params["path"], "/path/to/subtitle.srt")
+        self.assertEqual(params["type"], "movie")
+        self.assertEqual(params["id"], 123)
+
+    @patch("api.bazarr.requests.Session.patch")
+    def test_sync_subtitle_with_options(self, mock_patch):
+        """Test subtitle synchronization with custom options."""
+        mock_response = Mock()
+        mock_response.raise_for_status.return_value = None
+        mock_patch.return_value = mock_response
+
+        result = self.client.sync_subtitle(
+            subtitle_path="/path/to/subtitle.srt",
+            media_type="episode",
+            media_id=456,
+            language="fr",
+            forced=True,
+            hi=True,
+            reference="a:1",
+            max_offset_seconds=600,
+            no_fix_framerate=True,
+            use_gss=True,
+        )
+
+        self.assertTrue(result)
+
+        # Check custom parameters
+        call_args = mock_patch.call_args
+        params = call_args.kwargs["params"]
+        self.assertEqual(params["forced"], "true")
+        self.assertEqual(params["hi"], "true")
+        self.assertEqual(params["reference"], "a:1")
+        self.assertEqual(params["max_offset_seconds"], "600")
+        self.assertEqual(params["no_fix_framerate"], "true")
+        self.assertEqual(params["gss"], "true")
+
+    @patch("api.bazarr.requests.Session.patch")
+    def test_sync_subtitle_exception(self, mock_patch):
+        """Test sync_subtitle handles exceptions."""
+        mock_patch.side_effect = requests.exceptions.RequestException("Network error")
+
+        result = self.client.sync_subtitle(
+            subtitle_path="/path/to/subtitle.srt",
+            media_type="movie",
+            media_id=123,
+            language="en",
+        )
+
+        self.assertFalse(result)
+
+    @patch("api.bazarr.requests.Session.get")
+    def test_get_movie_subtitles_success(self, mock_get):
+        """Test successful get_movie_subtitles request."""
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "radarrid": 123,
+                    "title": "Test Movie",
+                    "subtitles": [
+                        {
+                            "code2": "en",
+                            "path": "/path/to/subtitle.srt",
+                            "forced": False,
+                            "hi": False,
+                        }
+                    ],
+                }
+            ]
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        result = self.client.get_movie_subtitles(123)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["radarrid"], 123)
+        self.assertIn("subtitles", result)
+        mock_get.assert_called_once()
+
+    @patch("api.bazarr.requests.Session.get")
+    def test_get_movie_subtitles_exception(self, mock_get):
+        """Test get_movie_subtitles handles exceptions."""
+        mock_get.side_effect = requests.exceptions.RequestException("Network error")
+
+        result = self.client.get_movie_subtitles(123)
+
+        self.assertIsNone(result)
+
+    # Episode-related tests
+
+    @patch("api.bazarr.requests.Session.get")
+    def test_get_wanted_episodes_success(self, mock_get):
+        """Test successful retrieval of wanted episodes."""
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "sonarrEpisodeId": 123,
+                    "sonarrSeriesId": 456,
+                    "title": "Pilot",
+                    "season": 1,
+                    "episode": 1,
+                    "missing_subtitles": [{"name": "English", "code2": "en"}],
+                },
+                {
+                    "sonarrEpisodeId": 124,
+                    "sonarrSeriesId": 456,
+                    "title": "Cat's in the Bag",
+                    "season": 1,
+                    "episode": 2,
+                    "missing_subtitles": [{"name": "Spanish", "code2": "es"}],
+                },
+            ]
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        # Mock series enrichment
+        with patch.object(self.client, "_enrich_episode_data", side_effect=lambda x: x):
+            episodes = self.client.get_wanted_episodes()
+
+        self.assertEqual(len(episodes), 2)
+        self.assertEqual(episodes[0]["title"], "Pilot")
+        self.assertEqual(episodes[0]["season"], 1)
+        self.assertEqual(episodes[0]["episode"], 1)
+        mock_get.assert_called_once()
+
+    @patch("api.bazarr.requests.Session.get")
+    def test_get_series_info_success(self, mock_get):
+        """Test successful series info retrieval."""
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "sonarrSeriesId": 456,
+                    "title": "Breaking Bad",
+                    "year": 2008,
+                    "imdbId": "tt0903747",
+                }
+            ]
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        series_info = self.client.get_series_info(456)
+
+        self.assertIsNotNone(series_info)
+        self.assertEqual(series_info["title"], "Breaking Bad")
+        self.assertEqual(series_info["year"], 2008)
+
+    @patch("api.bazarr.requests.Session.post")
+    def test_upload_episode_subtitle_success(self, mock_post):
+        """Test successful episode subtitle upload."""
+        mock_response = Mock()
+        mock_response.raise_for_status.return_value = None
+        mock_post.return_value = mock_response
+
+        # Create temporary subtitle file
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".srt", delete=False) as f:
+            f.write("1\n00:00:01,000 --> 00:00:02,000\nTest subtitle\n")
+            temp_file = f.name
+
+        try:
+            result = self.client.upload_episode_subtitle(
+                series_id=456,
+                episode_id=123,
+                language="en",
+                subtitle_file=temp_file,
+                forced=False,
+                hi=False,
+            )
+
+            self.assertTrue(result)
+            mock_post.assert_called_once()
+
+            # Check call parameters
+            call_args = mock_post.call_args
+            self.assertIn("params", call_args.kwargs)
+            self.assertEqual(call_args.kwargs["params"]["seriesid"], 456)
+            self.assertEqual(call_args.kwargs["params"]["episodeid"], 123)
+            self.assertEqual(call_args.kwargs["params"]["language"], "en")
+
+        finally:
+            import os
+
+            os.unlink(temp_file)
+
+    @patch("api.bazarr.requests.Session.patch")
+    def test_sync_episode_subtitle_success(self, mock_patch):
+        """Test successful episode subtitle synchronization."""
+        mock_response = Mock()
+        mock_response.raise_for_status.return_value = None
+        mock_patch.return_value = mock_response
+
+        result = self.client.sync_episode_subtitle(
+            subtitle_path="/path/to/episode.srt",
+            series_id=456,
+            episode_id=123,
+            language="en",
+            forced=False,
+            hi=False,
+        )
+
+        self.assertTrue(result)
+        mock_patch.assert_called_once()
+
+        # Check the call parameters
+        call_args = mock_patch.call_args
+        self.assertIn("params", call_args.kwargs)
+        params = call_args.kwargs["params"]
+        self.assertEqual(params["action"], "sync")
+        self.assertEqual(params["language"], "en")
+        self.assertEqual(params["path"], "/path/to/episode.srt")
+        self.assertEqual(params["type"], "episode")
+        self.assertEqual(params["id"], 123)
+
+    @patch("api.bazarr.requests.Session.get")
+    def test_get_episode_subtitles_success(self, mock_get):
+        """Test successful get_episode_subtitles request."""
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "sonarrEpisodeId": 123,
+                    "title": "Test Episode",
+                    "subtitles": [
+                        {
+                            "code2": "en",
+                            "path": "/path/to/episode.srt",
+                            "forced": False,
+                            "hi": False,
+                        }
+                    ],
+                }
+            ]
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        result = self.client.get_episode_subtitles(456, 123)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["sonarrEpisodeId"], 123)
+        self.assertIn("subtitles", result)
+        mock_get.assert_called_once()
+
+    @patch("api.bazarr.requests.Session.get")
+    def test_get_system_settings_success(self, mock_get):
+        """Test successful get_system_settings request."""
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "subsync": {
+                "max_offset_seconds": 300,
+                "no_fix_framerate": True,
+                "gss": False,
+            },
+            "general": {"use_subsync": True},
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        result = self.client.get_system_settings()
+
+        self.assertIsNotNone(result)
+        self.assertIn("subsync", result)
+        mock_get.assert_called_once()
+
+    @patch("api.bazarr.requests.Session.get")
+    def test_get_system_settings_exception(self, mock_get):
+        """Test get_system_settings handles exceptions."""
+        mock_get.side_effect = requests.exceptions.RequestException("Network error")
+
+        result = self.client.get_system_settings()
+
+        self.assertIsNone(result)
+
+    @patch.object(Bazarr, "get_system_settings")
+    def test_get_sync_settings_success(self, mock_get_settings):
+        """Test successful sync settings retrieval."""
+        mock_get_settings.return_value = {
+            "subsync": {
+                "use_subsync": False,
+                "max_offset_seconds": 600,
+                "no_fix_framerate": True,
+                "gss": True,
+            }
+        }
+
+        result = self.client.get_sync_settings()
+
+        expected = {
+            "enabled": False,
+            "max_offset_seconds": 600,
+            "no_fix_framerate": True,
+            "use_gss": True,
+            "reference": "a:0",
+        }
+        self.assertEqual(result, expected)
+
+    @patch.object(Bazarr, "get_system_settings")
+    def test_get_sync_settings_no_subsync_section(self, mock_get_settings):
+        """Test sync settings with missing subsync section."""
+        mock_get_settings.return_value = {"general": {"some_setting": True}}
+
+        result = self.client.get_sync_settings()
+
+        expected = {
+            "enabled": False,
+            "max_offset_seconds": 300,
+            "no_fix_framerate": False,
+            "use_gss": False,
+            "reference": "a:0",
+        }
+        self.assertEqual(result, expected)
+
+    @patch.object(Bazarr, "get_system_settings")
+    def test_get_sync_settings_api_failure(self, mock_get_settings):
+        """Test sync settings when API call fails."""
+        mock_get_settings.return_value = None
+
+        result = self.client.get_sync_settings()
+
+        expected = {
+            "enabled": False,
+            "max_offset_seconds": 300,
+            "no_fix_framerate": False,
+            "use_gss": False,
+            "reference": "a:0",
+        }
+        self.assertEqual(result, expected)
+
+    @patch.object(Bazarr, "get_system_settings")
+    def test_get_sync_settings_enabled(self, mock_get_settings):
+        """Test sync settings when SubSync is enabled."""
+        mock_get_settings.return_value = {
+            "subsync": {
+                "use_subsync": True,
+                "max_offset_seconds": 600,
+                "no_fix_framerate": False,
+                "gss": True,
+            }
+        }
+
+        result = self.client.get_sync_settings()
+
+        expected = {
+            "enabled": True,
+            "max_offset_seconds": 600,
+            "no_fix_framerate": False,
+            "use_gss": True,
+            "reference": "a:0",
+        }
+        self.assertEqual(result, expected)
+
+    @patch.object(Bazarr, "get_system_settings")
+    def test_get_subzero_settings_enabled(self, mock_get_settings):
+        """Test Sub-Zero settings when modifications are enabled."""
+        mock_get_settings.return_value = {
+            "general": {"subzero_mods": ["common", "hearing_impaired"]}
+        }
+
+        result = self.client.get_subzero_settings()
+
+        expected = {"mods": ["common", "hearing_impaired"], "enabled": True}
+        self.assertEqual(result, expected)
+
+    @patch.object(Bazarr, "get_system_settings")
+    def test_get_subzero_settings_disabled(self, mock_get_settings):
+        """Test Sub-Zero settings when no modifications are configured."""
+        mock_get_settings.return_value = {"general": {"subzero_mods": []}}
+
+        result = self.client.get_subzero_settings()
+
+        expected = {"mods": [], "enabled": False}
+        self.assertEqual(result, expected)
+
+    @patch.object(Bazarr, "get_system_settings")
+    def test_get_subzero_settings_missing_section(self, mock_get_settings):
+        """Test Sub-Zero settings when general section is missing."""
+        mock_get_settings.return_value = {"subsync": {"use_subsync": True}}
+
+        result = self.client.get_subzero_settings()
+
+        expected = {"mods": [], "enabled": False}
+        self.assertEqual(result, expected)
+
+    @patch.object(Bazarr, "get_system_settings")
+    def test_get_subzero_settings_api_failure(self, mock_get_settings):
+        """Test Sub-Zero settings when API call fails."""
+        mock_get_settings.return_value = None
+
+        result = self.client.get_subzero_settings()
+
+        expected = {"mods": [], "enabled": False}
+        self.assertEqual(result, expected)
+
+    @patch("api.bazarr.requests.Session.patch")
+    def test_trigger_subzero_mods_success(self, mock_patch):
+        """Test successful Sub-Zero modification trigger."""
+        mock_response = Mock()
+        mock_response.raise_for_status.return_value = None
+        mock_patch.return_value = mock_response
+
+        result = self.client.trigger_subzero_mods(
+            subtitle_path="/path/to/subtitle.srt",
+            media_type="movie",
+            media_id=123,
+            language="en",
+            forced=False,
+            hi=False,
+        )
+
+        self.assertTrue(result)
+        mock_patch.assert_called_once()
+
+        # Check the call parameters
+        call_args = mock_patch.call_args
+        self.assertIn("params", call_args.kwargs)
+        params = call_args.kwargs["params"]
+        self.assertEqual(params["action"], "subzero")
+        self.assertEqual(params["language"], "en")
+        self.assertEqual(params["path"], "/path/to/subtitle.srt")
+        self.assertEqual(params["type"], "movie")
+        self.assertEqual(params["id"], 123)
+
+    @patch("api.bazarr.requests.Session.patch")
+    def test_trigger_subzero_mods_exception(self, mock_patch):
+        """Test Sub-Zero trigger handles exceptions."""
+        mock_patch.side_effect = requests.exceptions.RequestException("Network error")
+
+        result = self.client.trigger_subzero_mods(
+            subtitle_path="/path/to/subtitle.srt",
+            media_type="movie",
+            media_id=123,
+            language="en",
+        )
+
+        self.assertFalse(result)
+
+    @patch("api.bazarr.requests.Session.patch")
+    def test_trigger_episode_subzero_mods_success(self, mock_patch):
+        """Test successful episode Sub-Zero modification trigger."""
+        mock_response = Mock()
+        mock_response.raise_for_status.return_value = None
+        mock_patch.return_value = mock_response
+
+        result = self.client.trigger_episode_subzero_mods(
+            subtitle_path="/path/to/episode.srt",
+            series_id=456,
+            episode_id=123,
+            language="fr",
+            forced=True,
+            hi=True,
+        )
+
+        self.assertTrue(result)
+        mock_patch.assert_called_once()
+
+        # Check the call parameters
+        call_args = mock_patch.call_args
+        self.assertIn("params", call_args.kwargs)
+        params = call_args.kwargs["params"]
+        self.assertEqual(params["action"], "subzero")
+        self.assertEqual(params["language"], "fr")
+        self.assertEqual(params["path"], "/path/to/episode.srt")
+        self.assertEqual(params["type"], "episode")
+        self.assertEqual(params["id"], 123)
+        self.assertEqual(params["forced"], "true")
+        self.assertEqual(params["hi"], "true")
+
+    @patch("api.bazarr.requests.Session.patch")
+    def test_trigger_episode_subzero_mods_exception(self, mock_patch):
+        """Test episode Sub-Zero trigger handles exceptions."""
+        mock_patch.side_effect = requests.exceptions.RequestException("Network error")
+
+        result = self.client.trigger_episode_subzero_mods(
+            subtitle_path="/path/to/episode.srt",
+            series_id=456,
+            episode_id=123,
+            language="en",
+        )
+
+        self.assertFalse(result)
 
 
 if __name__ == "__main__":

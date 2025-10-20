@@ -6,7 +6,7 @@ import json
 import logging
 import os
 import re
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import requests
 
@@ -54,7 +54,7 @@ class Bazarr:
             logger.error(f"Error parsing JSON response: {e}")
             return None
 
-    def upload_subtitle_to_bazarr(
+    def upload_movie_subtitle(
         self,
         radarr_id: int,
         subtitle_file: str,
@@ -63,7 +63,7 @@ class Bazarr:
         hi: bool = False,
     ) -> bool:
         """
-        Upload a subtitle file to Bazarr.
+        Upload a subtitle file for a movie to Bazarr.
 
         Args:
             radarr_id: Radarr movie ID
@@ -104,6 +104,207 @@ class Bazarr:
         except IOError as e:
             print(f"    ✗ Error reading subtitle file: {e}")
             return False
+
+    def sync_subtitle(
+        self,
+        subtitle_path: str,
+        media_type: str,
+        media_id: int,
+        language: str,
+        forced: bool = False,
+        hi: bool = False,
+        reference: str = "a:0",
+        max_offset_seconds: int = 300,
+        no_fix_framerate: bool = False,
+        use_gss: bool = False,
+    ) -> bool:
+        """
+        Synchronize a subtitle file using Bazarr's sync functionality.
+
+        Args:
+            subtitle_path: Path to the subtitle file on the Bazarr server
+            media_type: Either "movie" or "episode"
+            media_id: Media ID (radarrId for movies, episodeId for episodes)
+            language: Language code (e.g., 'en')
+            forced: Whether subtitle is forced
+            hi: Whether subtitle is hearing impaired
+            reference: Reference for sync (e.g., 'a:0' for first audio track)
+            max_offset_seconds: Maximum offset seconds to allow
+            no_fix_framerate: Don't try to fix framerate issues
+            use_gss: Use Golden-Section Search algorithm
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            url = f"{self.bazarr_url}/api/subtitles"
+
+            # Prepare sync parameters
+            params = {
+                "action": "sync",
+                "language": language,
+                "path": subtitle_path,
+                "type": media_type,
+                "id": media_id,
+                "forced": "true" if forced else "false",
+                "hi": "true" if hi else "false",
+                "reference": reference,
+                "max_offset_seconds": str(max_offset_seconds),
+                "no_fix_framerate": "true" if no_fix_framerate else "false",
+                "gss": "true" if use_gss else "false",
+            }
+
+            response = self.session.patch(
+                url, params=params, auth=self.auth, timeout=300
+            )
+            response.raise_for_status()
+
+            print("    ✓ Synchronized subtitle with Bazarr")
+            return True
+
+        except requests.exceptions.RequestException as e:
+            print(f"    ✗ Error synchronizing subtitle: {e}")
+            return False
+
+    def trigger_subzero_mods(
+        self,
+        subtitle_path: str,
+        media_type: str,
+        media_id: int,
+        language: str,
+        forced: bool = False,
+        hi: bool = False,
+    ) -> bool:
+        """
+        Trigger Sub-Zero subtitle modifications using Bazarr's API.
+
+        Args:
+            subtitle_path: Path to the subtitle file on the Bazarr server
+            media_type: Either "movie" or "episode"
+            media_id: Media ID (radarrId for movies, episodeId for episodes)
+            language: Language code (e.g., 'en')
+            forced: Whether subtitle is forced
+            hi: Whether subtitle is hearing impaired
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            url = f"{self.bazarr_url}/api/subtitles"
+
+            # Prepare Sub-Zero modification parameters
+            params = {
+                "action": "subzero",
+                "language": language,
+                "path": subtitle_path,
+                "type": media_type,
+                "id": media_id,
+                "forced": "true" if forced else "false",
+                "hi": "true" if hi else "false",
+            }
+
+            response = self.session.patch(
+                url, params=params, auth=self.auth, timeout=60
+            )
+            response.raise_for_status()
+
+            print("    ✓ Applied Sub-Zero modifications")
+            return True
+
+        except requests.exceptions.RequestException as e:
+            print(f"    ✗ Error applying Sub-Zero modifications: {e}")
+            return False
+
+    def get_movie_subtitles(self, radarr_id: int) -> Optional[Dict]:
+        """
+        Get movie details including subtitle information.
+
+        Args:
+            radarr_id: Radarr movie ID
+
+        Returns:
+            Movie data with subtitle paths or None if error
+        """
+        try:
+            url = f"{self.bazarr_url}/api/movies"
+            params = {"radarrid[]": radarr_id}
+
+            response = self.session.get(url, params=params, auth=self.auth, timeout=30)
+            response.raise_for_status()
+
+            data = response.json()
+            if data and "data" in data and data["data"]:
+                return data["data"][0]  # Return first (and only) movie
+            return None
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error getting movie subtitles: {e}")
+            return None
+        except (json.JSONDecodeError, KeyError, IndexError) as e:
+            logger.error(f"Error parsing movie subtitles response: {e}")
+            return None
+
+    def get_system_settings(self) -> Optional[Dict]:
+        """
+        Get system settings from Bazarr.
+
+        Returns:
+            Dictionary containing system settings or None if error
+        """
+        try:
+            url = f"{self.bazarr_url}/api/system/settings"
+            response = self.session.get(url, auth=self.auth, timeout=30)
+            response.raise_for_status()
+            return response.json()
+        except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
+            logger.error(f"Error fetching system settings: {e}")
+            return None
+
+    def get_sync_settings(self) -> Dict:
+        """
+        Get subtitle synchronization settings from Bazarr's system settings.
+
+        Returns:
+            Dictionary containing sync settings with defaults if not available
+        """
+        settings = self.get_system_settings()
+        if not settings or "subsync" not in settings:
+            logger.warning("Could not fetch sync settings from Bazarr, using defaults")
+            return {
+                "enabled": False,
+                "max_offset_seconds": 300,
+                "no_fix_framerate": False,
+                "use_gss": False,
+                "reference": "a:0",
+            }
+
+        subsync = settings["subsync"]
+        return {
+            "enabled": subsync.get("use_subsync", False),
+            "max_offset_seconds": subsync.get("max_offset_seconds", 300),
+            "no_fix_framerate": subsync.get("no_fix_framerate", False),
+            "use_gss": subsync.get("gss", False),
+            "reference": "a:0",  # Always use first audio track as reference
+        }
+
+    def get_subzero_settings(self) -> Dict:
+        """
+        Get Sub-Zero subtitle modification settings from Bazarr's system settings.
+
+        Returns:
+            Dictionary containing Sub-Zero settings with defaults if not available
+        """
+        settings = self.get_system_settings()
+        if not settings or "general" not in settings:
+            logger.warning(
+                "Could not fetch Sub-Zero settings from Bazarr, using defaults"
+            )
+            return {"mods": [], "enabled": False}
+
+        general = settings["general"]
+        subzero_mods = general.get("subzero_mods", [])
+
+        return {"mods": subzero_mods, "enabled": len(subzero_mods) > 0}
 
     def get_system_tasks(self) -> Optional[Dict]:
         """
@@ -182,7 +383,6 @@ class Bazarr:
                 search_name.lower() in task_job_id.lower()
                 for search_name in search_task_names
             ):
-
                 # Get interval - could be in different formats
                 interval_str = task.get("interval", "")
 
@@ -295,3 +495,331 @@ class Bazarr:
             return int(interval_str) * 60
 
         raise ValueError(f"Unrecognized interval format: {interval_str}")
+
+    def get_wanted_episodes(self, start: int = 0, length: int = -1) -> List[Dict]:
+        """
+        Get list of wanted episodes from Bazarr.
+
+        Args:
+            start: Paging start integer
+            length: Paging length integer (-1 for all)
+
+        Returns:
+            List of wanted episode dictionaries
+        """
+        try:
+            url = f"{self.bazarr_url}/api/episodes/wanted"
+            params = {"start": start, "length": length}
+
+            response = self.session.get(url, params=params, auth=self.auth, timeout=30)
+            response.raise_for_status()
+
+            data = response.json()
+            episodes = data.get("data", []) if isinstance(data, dict) else data
+
+            # Enrich episode data with series information
+            enriched_episodes = []
+            for episode in episodes:
+                enriched_episode = self._enrich_episode_data(episode)
+                if enriched_episode:
+                    enriched_episodes.append(enriched_episode)
+
+            logger.info(f"Found {len(enriched_episodes)} wanted episodes")
+            return enriched_episodes
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching wanted episodes: {e}")
+            return []
+
+    def _enrich_episode_data(self, episode: Dict) -> Optional[Dict]:
+        """
+        Enrich episode data with series information.
+
+        Args:
+            episode: Raw episode data from Bazarr
+
+        Returns:
+            Enriched episode data or None
+        """
+        season, episode_number = episode.get("episode_number", "").split("x")
+        enriched_episode = {
+            "series_title": episode.get("seriesTitle", "Unknown Series").strip(),
+            "season": season,
+            "episode_number": episode_number,
+            "episode_title": episode.get("episodeTitle", "Unknown Episode").strip(),
+            "missing_subtitles": episode.get("missing_subtitles", []),
+            "sonarr_series_id": episode.get("sonarrSeriesId", ""),
+            "sonarr_episode_id": episode.get("sonarrEpisodeId", ""),
+            "scene_name": episode.get("sceneName", ""),
+            "tags": episode.get("tags", []),
+            "series_type": episode.get("seriesType", "standard"),
+        }
+
+        try:
+            # Get more series information
+            series_info = self.get_series_info(enriched_episode["sonarr_series_id"])
+            if series_info:
+                enriched_episode["year"] = series_info.get("year")
+                enriched_episode["imdb"] = series_info.get("imdbId")
+                enriched_episode["tvdb"] = series_info.get("tvdbId")
+
+            return enriched_episode
+
+        except Exception as e:
+            logger.warning(f"Could not enrich episode data: {e}")
+            return enriched_episode
+
+    def get_series_info(self, series_id: int) -> Optional[Dict]:
+        """
+        Get series information from Bazarr.
+
+        Args:
+            series_id: Series ID
+
+        Returns:
+            Series information dictionary or None
+        """
+        try:
+            url = f"{self.bazarr_url}/api/series"
+            params = {"seriesid[]": series_id}
+
+            response = self.session.get(url, params=params, auth=self.auth, timeout=30)
+            response.raise_for_status()
+
+            data = response.json()
+            series_list = data.get("data", []) if isinstance(data, dict) else data
+
+            # Find the series with matching ID
+            for series in series_list:
+                if (
+                    series.get("sonarrSeriesId") == series_id
+                    or series.get("seriesId") == series_id
+                ):
+                    return series
+
+            return None
+
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Error fetching series info for ID {series_id}: {e}")
+            return None
+
+    def upload_episode_subtitle(
+        self,
+        series_id: int,
+        episode_id: int,
+        language: str,
+        subtitle_file: str,
+        forced: bool = False,
+        hi: bool = False,
+    ) -> bool:
+        """
+        Upload a subtitle file for an episode to Bazarr.
+
+        Args:
+            series_id: Series ID
+            episode_id: Episode ID
+            language: Language code (e.g., 'en')
+            subtitle_file: Path to subtitle file
+            forced: Whether subtitle is forced
+            hi: Whether subtitle is hearing impaired
+
+        Returns:
+            True if upload successful, False otherwise
+        """
+        try:
+            url = f"{self.bazarr_url}/api/episodes/subtitles"
+
+            params = {
+                "seriesid": series_id,
+                "episodeid": episode_id,
+                "language": language,
+                "forced": "true" if forced else "false",
+                "hi": "true" if hi else "false",
+            }
+
+            with open(subtitle_file, "rb") as f:
+                files = {"file": (subtitle_file, f, "text/plain")}
+
+                response = self.session.post(
+                    url, params=params, files=files, auth=self.auth, timeout=60
+                )
+                response.raise_for_status()
+
+            logger.info(
+                f"Successfully uploaded subtitle for episode {episode_id}: "
+                f"{subtitle_file}"
+            )
+            return True
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error uploading episode subtitle: {e}")
+            return False
+        except FileNotFoundError:
+            logger.error(f"Subtitle file not found: {subtitle_file}")
+            return False
+
+    def get_episode_search_interval(self) -> int:
+        """
+        Get episode search interval from Bazarr settings.
+
+        Returns:
+            Search interval in hours (default 24)
+        """
+        try:
+            url = f"{self.bazarr_url}/api/system/settings"
+            response = self.session.get(url, auth=self.auth, timeout=30)
+            response.raise_for_status()
+
+            settings = response.json()
+
+            # Look for episode search interval setting
+            # This might be under different keys depending on Bazarr version
+            interval = settings.get("general", {}).get("episode_search_interval", 24)
+            if isinstance(interval, str):
+                interval = int(interval)
+
+            return max(1, interval)  # Minimum 1 hour
+
+        except Exception as e:
+            logger.warning(f"Could not get episode search interval from Bazarr: {e}")
+            return 24  # Default fallback
+
+    def sync_episode_subtitle(
+        self,
+        subtitle_path: str,
+        series_id: int,
+        episode_id: int,
+        language: str,
+        forced: bool = False,
+        hi: bool = False,
+        reference: str = "a:0",
+        max_offset_seconds: int = 300,
+        no_fix_framerate: bool = False,
+        use_gss: bool = False,
+    ) -> bool:
+        """
+        Synchronize an episode subtitle file using Bazarr's sync functionality.
+
+        Args:
+            subtitle_path: Path to the subtitle file on the Bazarr server
+            series_id: Sonarr series ID
+            episode_id: Sonarr episode ID
+            language: Language code (e.g., 'en')
+            forced: Whether subtitle is forced
+            hi: Whether subtitle is hearing impaired
+            reference: Reference for sync (e.g., 'a:0' for first audio track)
+            max_offset_seconds: Maximum offset seconds to allow
+            no_fix_framerate: Don't try to fix framerate issues
+            use_gss: Use Golden-Section Search algorithm
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            url = f"{self.bazarr_url}/api/subtitles"
+
+            # Prepare sync parameters
+            params = {
+                "action": "sync",
+                "language": language,
+                "path": subtitle_path,
+                "type": "episode",
+                "id": episode_id,
+                "forced": "true" if forced else "false",
+                "hi": "true" if hi else "false",
+                "reference": reference,
+                "max_offset_seconds": str(max_offset_seconds),
+                "no_fix_framerate": "true" if no_fix_framerate else "false",
+                "gss": "true" if use_gss else "false",
+            }
+
+            response = self.session.patch(
+                url, params=params, auth=self.auth, timeout=300
+            )
+            response.raise_for_status()
+
+            print("    ✓ Synchronized episode subtitle with Bazarr")
+            return True
+
+        except requests.exceptions.RequestException as e:
+            print(f"    ✗ Error synchronizing episode subtitle: {e}")
+            return False
+
+    def trigger_episode_subzero_mods(
+        self,
+        subtitle_path: str,
+        series_id: int,
+        episode_id: int,
+        language: str,
+        forced: bool = False,
+        hi: bool = False,
+    ) -> bool:
+        """
+        Trigger Sub-Zero subtitle modifications for an episode using Bazarr's API.
+
+        Args:
+            subtitle_path: Path to the subtitle file on the Bazarr server
+            series_id: Sonarr series ID
+            episode_id: Sonarr episode ID
+            language: Language code (e.g., 'en')
+            forced: Whether subtitle is forced
+            hi: Whether subtitle is hearing impaired
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            url = f"{self.bazarr_url}/api/subtitles"
+
+            # Prepare Sub-Zero modification parameters
+            params = {
+                "action": "subzero",
+                "language": language,
+                "path": subtitle_path,
+                "type": "episode",
+                "id": episode_id,
+                "forced": "true" if forced else "false",
+                "hi": "true" if hi else "false",
+            }
+
+            response = self.session.patch(
+                url, params=params, auth=self.auth, timeout=60
+            )
+            response.raise_for_status()
+
+            print("    ✓ Applied Sub-Zero modifications to episode")
+            return True
+
+        except requests.exceptions.RequestException as e:
+            print(f"    ✗ Error applying Sub-Zero modifications to episode: {e}")
+            return False
+
+    def get_episode_subtitles(self, series_id: int, episode_id: int) -> Optional[Dict]:
+        """
+        Get episode details including subtitle information.
+
+        Args:
+            series_id: Sonarr series ID
+            episode_id: Sonarr episode ID
+
+        Returns:
+            Episode data with subtitle paths or None if error
+        """
+        try:
+            url = f"{self.bazarr_url}/api/episodes"
+            params = {"seriesid[]": series_id, "episodeid[]": episode_id}
+
+            response = self.session.get(url, params=params, auth=self.auth, timeout=30)
+            response.raise_for_status()
+
+            data = response.json()
+            if data and "data" in data and data["data"]:
+                return data["data"][0]  # Return first (and only) episode
+            return None
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error getting episode subtitles: {e}")
+            return None
+        except (KeyError, IndexError) as e:
+            logger.error(f"Error parsing episode subtitles response: {e}")
+            return None

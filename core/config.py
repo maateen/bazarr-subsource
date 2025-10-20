@@ -104,7 +104,7 @@ def create_default_config(config_file: Path):
             "in front of Bazarr\n"
         )
         f.write(
-            "# Leave empty or remove this section if connecting " "directly to Bazarr\n"
+            "# Leave empty or remove this section if connecting directly to Bazarr\n"
         )
         f.write("username = your_username\n")
         f.write("password = your_password\n\n")
@@ -121,7 +121,7 @@ def create_default_config(config_file: Path):
         f.write("enabled = true\n\n")
 
         f.write("[episodes]\n")
-        f.write("# Enable TV show episode subtitle downloads\n")
+        f.write("# Enable TV series episode subtitle downloads\n")
         f.write("enabled = true\n")
         f.write("# Search patterns: season_episode,episode_title,scene_name\n")
         f.write("search_patterns = season_episode,episode_title,scene_name\n\n")
@@ -152,7 +152,10 @@ def setup_logging(log_level: str, log_file: str):
 
     # Rotating file handler - 10MB max, keep 5 old files
     file_handler = logging.handlers.RotatingFileHandler(
-        log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"  # 10MB
+        log_file,
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",  # 10MB
     )
     file_handler.setLevel(level)
     file_handler.setFormatter(detailed_formatter)

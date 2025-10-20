@@ -5,9 +5,10 @@ SubSource API client for downloading subtitles.
 import json
 import logging
 import os
+import re
 import time
 import zipfile
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import requests
 
@@ -31,13 +32,12 @@ class SubSourceDownloader:
         # Setup optimized session headers
         self.session.headers.update(
             {
-                "User-Agent": (
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36"
-                ),
                 "Accept": "application/json",
                 "Content-Type": "application/json",
                 "Connection": "keep-alive",
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+                ),
             }
         )
 
@@ -207,8 +207,7 @@ class SubSourceDownloader:
 
             if not download_token:
                 logger.error(
-                    f"No download token found in response for subtitle ID "
-                    f"{subtitle_id}"
+                    f"No download token found in response for subtitle ID {subtitle_id}"
                 )
                 logger.debug(f"Response data: {details_data}")
                 return None
@@ -234,8 +233,7 @@ class SubSourceDownloader:
 
             if "text/html" in content_type:
                 logger.error(
-                    f"Received HTML instead of ZIP file for subtitle ID "
-                    f"{subtitle_id}"
+                    f"Received HTML instead of ZIP file for subtitle ID {subtitle_id}"
                 )
                 return None
 
@@ -317,8 +315,7 @@ class SubSourceDownloader:
 
                 if not subtitle_files:
                     logger.error(
-                        f"No subtitle files found in ZIP for subtitle ID "
-                        f"{subtitle_id}"
+                        f"No subtitle files found in ZIP for subtitle ID {subtitle_id}"
                     )
                     return None
 
@@ -562,3 +559,384 @@ class SubSourceDownloader:
         summary = self.tracker.get_tracking_summary()
         summary["search_interval_hours"] = self._get_search_interval_hours()
         return summary
+
+    # TV Series / Episode methods
+
+    def _extract_episode_info_from_subtitle(
+        self, subtitle: Dict
+    ) -> Tuple[Optional[int], Optional[int]]:
+        """
+        Extract season/episode info from subtitle release info.
+
+        Args:
+            subtitle: Subtitle data from SubSource
+
+        Returns:
+            Tuple of (season, episode) or (None, None) if not found
+        """
+        release_info = subtitle.get("release_info", "")
+
+        # Look for E01 pattern (simplified)
+        episode_match = re.search(r"[Ee](\d+)", release_info)
+        if episode_match:
+            episode = int(episode_match.group(1))
+            # For E01 format, we don't extract season from the subtitle
+            # We rely on the season context from the search
+            return None, episode
+
+        # Fallback: Look for S01E01 pattern for compatibility
+        season_episode_match = re.search(r"[Ss](\d+)[Ee](\d+)", release_info)
+        if season_episode_match:
+            season = int(season_episode_match.group(1))
+            episode = int(season_episode_match.group(2))
+            return season, episode
+
+        # Look for 1x01 pattern
+        alt_pattern = re.search(r"(\d+)x(\d+)", release_info)
+        if alt_pattern:
+            season = int(alt_pattern.group(1))
+            episode = int(alt_pattern.group(2))
+            return season, episode
+
+        return None, None
+
+    def _find_best_series_match(
+        self,
+        search_results: List[Dict],
+        series_title: str,
+        series_year: Optional[int],
+        season: int,
+    ) -> Optional[Dict]:
+        """
+        Find the best matching TV series from search results.
+
+        Args:
+            search_results: List of search results from SubSource
+            series_title: Target series title
+            series_year: Target series year (optional)
+            season: Target season number
+
+        Returns:
+            Best matching series or None
+        """
+        series_candidates = []
+
+        # Filter for TV series results
+        for result in search_results:
+            result_type = result.get("type", "").lower()
+            result_title = result.get("title", "").lower()
+            series_title_lower = series_title.lower()
+
+            # Must be a TV series and title must match
+            if result_type == "tvseries" and series_title_lower in result_title:
+                series_candidates.append(result)
+
+        if not series_candidates:
+            print(f"      No TV series found matching '{series_title}'")
+            return None
+
+        print(f"      Found {len(series_candidates)} TV series candidate(s)")
+
+        # If only one candidate, return it
+        if len(series_candidates) == 1:
+            return series_candidates[0]
+
+        # Multiple candidates - filter by release year if available
+        if series_year:
+            year_matches = []
+            for candidate in series_candidates:
+                candidate_year = candidate.get("releaseYear")
+                if candidate_year == series_year:
+                    year_matches.append(candidate)
+
+            if year_matches:
+                print(f"      Matched {len(year_matches)} series by year {series_year}")
+                # If multiple year matches, check for season availability
+                if len(year_matches) == 1:
+                    return year_matches[0]
+                else:
+                    # Check which has the target season
+                    for candidate in year_matches:
+                        if self._has_season(candidate, season):
+                            return candidate
+                    # If no season match, return first year match
+                    return year_matches[0]
+
+        # No year match or no year provided - check for season availability
+        for candidate in series_candidates:
+            if self._has_season(candidate, season):
+                print(f"      Selected series with season {season}")
+                return candidate
+
+        # If no season match, return first candidate
+        print("      No exact match found, using first candidate")
+        return series_candidates[0]
+
+    def _has_season(self, series: Dict, season: int) -> bool:
+        """
+        Check if a series has the specified season.
+
+        Args:
+            series: Series data from SubSource
+            season: Target season number
+
+        Returns:
+            True if series has the season
+        """
+        seasons = series.get("seasons", [])
+        if not seasons:
+            return False
+
+        for season_data in seasons:
+            season_num = season_data.get("season")
+            if season_num == season:
+                return True
+        return False
+
+    def _get_season_link(self, series: Dict, season: int) -> Optional[str]:
+        """
+        Get the link for a specific season from series data.
+
+        Args:
+            series: Series data from SubSource
+            season: Target season number
+
+        Returns:
+            Season link or None if not found
+        """
+        seasons = series.get("seasons", [])
+        if not seasons:
+            print("      No seasons data available")
+            return None
+
+        # Look for exact season match first
+        for season_data in seasons:
+            season_num = int(season_data.get("season"))
+            if int(season_num) == int(season):
+                link = season_data.get("link")
+                if link:
+                    print(f"      Found exact season {season} match")
+                    return link.replace("=", "-")
+
+        # If only one season available, use it even if number doesn't match
+        if len(seasons) == 1:
+            link = seasons[0].get("link")
+            if link:
+                available_season = seasons[0].get("season", "unknown")
+                print(
+                    f"      Using only available season {available_season} for target season {season}"
+                )
+                return link.replace("=", "-")
+
+        # Multiple seasons but no exact match - check release years
+        series_year = series.get("releaseYear")
+        if series_year:
+            # Try to find season with matching release year or close to it
+            for season_data in seasons:
+                season_year = season_data.get("releaseYear")
+                if season_year and abs(season_year - series_year) <= 1:  # Within 1 year
+                    link = season_data.get("link")
+                    if link:
+                        available_season = season_data.get("season", "unknown")
+                        print(
+                            f"      Using season {available_season} based on release year match"
+                        )
+                        return link.replace("=", "-")
+
+        print(f"      No suitable season found for season {season}")
+        return None
+
+    def _is_subtitle_match(self, subtitle: Dict, target_episode: Dict) -> bool:
+        """
+        Check if a subtitle matches the target episode.
+
+        Args:
+            subtitle: Subtitle data from SubSource
+            target_episode: Episode data from Bazarr
+
+        Returns:
+            True if subtitle matches episode
+        """
+        target_season = target_episode.get("season")
+        target_episode_num = target_episode.get("episode")
+
+        if not target_season or not target_episode_num:
+            return False
+
+        sub_season, sub_episode = self._extract_episode_info_from_subtitle(subtitle)
+
+        # If we got both season and episode from subtitle (S01E01 format)
+        if sub_season is not None and sub_episode is not None:
+            return sub_season == target_season and sub_episode == target_episode_num
+
+        # If we only got episode number (E01 format), match just the episode
+        # We assume the season context is correct from the search
+        if sub_episode is not None:
+            return sub_episode == target_episode_num
+
+        return False
+
+    def search_episode_subtitles(
+        self, episode: Dict, language: str = "english"
+    ) -> List[Dict]:
+        """
+        Search for subtitles for a specific episode.
+
+        Args:
+            episode: Episode data from Bazarr
+            language: Subtitle language
+
+        Returns:
+            List of matching subtitle results
+        """
+        series_title = episode.get("series_title", "Unknown")
+        season = episode.get("season", 0)
+        episode_number = episode.get("episode_number", 0)
+        series_year = episode.get("seriesYear")
+
+        print(f"    Searching SubSource for: {series_title} S{season}E{episode_number}")
+
+        try:
+            print(f"      Searching with series name: {series_title}")
+
+            # Search with original series name only
+            search_url = f"{self.api_url}/movie/search"
+            search_payload = {
+                "query": series_title,
+                "signal": {},
+                "includeSeasons": True,  # Include TV shows
+                "limit": 15,
+            }
+
+            response = self.session.post(search_url, json=search_payload, timeout=15)
+            response.raise_for_status()
+
+            time.sleep(2)  # Rate limiting
+
+            search_data = response.json()
+            search_results = search_data.get("results", [])
+
+            print(f"      Found {len(search_results)} result(s)")
+
+            # Find the best matching TV series
+            best_series = self._find_best_series_match(
+                search_results, series_title, series_year, season
+            )
+
+            if not best_series:
+                print("      No matching TV series found")
+                episode_key = f"{series_title}:S{season}E{episode_number}"
+                self.tracker.record_no_subtitles_found(episode_key, 0, language)
+                return []
+
+            # Get season link from the best series
+            season_link = self._get_season_link(best_series, season)
+            if not season_link:
+                print(f"      Season {season} not found in series")
+                episode_key = f"{series_title}:S{season}E{episode_number}"
+                self.tracker.record_no_subtitles_found(episode_key, 0, language)
+                return []
+
+            print(f"      Found season {season}, getting subtitles...")
+
+            # Get subtitles for the season
+            subtitles_url = f"{self.api_url}{season_link}"
+            params = {"language": language.lower(), "sort_by_date": "false"}
+
+            time.sleep(2)  # Rate limiting
+
+            sub_response = self.session.get(subtitles_url, params=params, timeout=15)
+            sub_response.raise_for_status()
+
+            subtitles_data = sub_response.json()
+            if isinstance(subtitles_data, list):
+                subtitles = subtitles_data
+            else:
+                subtitles = subtitles_data.get("subtitles", [])
+
+            # Filter subtitles that match our episode
+            matching_subtitles = []
+            for subtitle in subtitles:
+                if self._is_subtitle_match(subtitle, episode):
+                    subtitle["source_query"] = series_title
+                    subtitle["source_link"] = season_link
+                    matching_subtitles.append(subtitle)
+
+            print(f"      Found {len(matching_subtitles)} matching episode subtitles")
+
+            if not matching_subtitles:
+                episode_key = f"{series_title}:S{season}E{episode_number}"
+                self.tracker.record_no_subtitles_found(episode_key, 0, language)
+
+            return matching_subtitles
+
+        except requests.exceptions.RequestException as e:
+            print(f"      Error searching for episode: {e}")
+            episode_key = f"{series_title}:S{season}E{episode_number}"
+            self.tracker.record_no_subtitles_found(episode_key, 0, language)
+            return []
+
+    def get_subtitle_for_episode(self, episode: Dict) -> Tuple[List[str], int]:
+        """
+        Download subtitles for an episode.
+
+        Args:
+            episode: Episode dictionary from Bazarr API
+
+        Returns:
+            Tuple of (downloaded subtitle file paths, number of skipped subtitles)
+        """
+        series_title = episode.get("series_title")
+        season = episode.get("season")
+        episode_number = episode.get("episode_number")
+        missing_subs = episode.get("missing_subtitles", [])
+
+        episode_key = f"{series_title}:S{season}E{episode_number}"
+
+        downloaded_files = []
+        skipped_count = 0
+
+        print(f"  Processing: {episode_key}")
+
+        for sub in missing_subs:
+            lang_name = sub.get("name", "Unknown")
+            lang_code = sub.get("code2", "en")
+
+            print(f"    Looking for {lang_name} subtitle...")
+
+            # Check if we should skip this search based on recent failures
+            search_interval = self._get_search_interval_hours()
+            if self.tracker.should_skip_search(
+                episode_key, 0, lang_name.lower(), search_interval
+            ):
+                print(
+                    f"    Skipping {lang_name} subtitle "
+                    f"(last tried within {search_interval}h interval)"
+                )
+                skipped_count += 1
+                continue
+
+            # Search for subtitles
+            results = self.search_episode_subtitles(episode, lang_name.lower())
+
+            if not results:
+                print(f"    No subtitles found for {lang_name}")
+                continue
+
+            # Take the best result (first one)
+            best_result = results[0]
+
+            # Download subtitle
+            downloaded_file = self.download_subtitle(
+                best_result, f"temp_episode_{lang_code}.srt"
+            )
+            if downloaded_file:
+                downloaded_files.append(downloaded_file)
+                print(f"    ✓ Downloaded {lang_name} subtitle")
+            else:
+                self.tracker.record_download_failure(
+                    episode_key, 0, lang_name.lower(), "Download failed"
+                )
+                print(f"    ✗ Failed to download {lang_name} subtitle")
+
+        return downloaded_files, skipped_count

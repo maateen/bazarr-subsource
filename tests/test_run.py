@@ -35,12 +35,21 @@ class TestRun(unittest.TestCase):
             "password": "test_pass",
             "subsource_api_url": "https://api.test.com",
             "download_directory": "/tmp",
+            "episodes_enabled": False,  # Disable episodes for this test
         }
         mock_load_config.return_value = mock_config
 
         # Mock Bazarr client
         mock_bazarr = Mock()
         mock_bazarr.get_wanted_movies.return_value = {"data": []}
+        mock_bazarr.get_sync_settings.return_value = {
+            "enabled": False,
+            "max_offset_seconds": 300,
+            "no_fix_framerate": False,
+            "use_gss": False,
+            "reference": "a:0",
+        }
+        mock_bazarr.get_subzero_settings.return_value = {"mods": [], "enabled": False}
         mock_bazarr_class.return_value = mock_bazarr
 
         # Mock logging setup
@@ -90,6 +99,7 @@ class TestRun(unittest.TestCase):
             "password": "test_pass",
             "subsource_api_url": "https://api.test.com",
             "download_directory": "/tmp",
+            "episodes_enabled": False,  # Disable episodes for this test
         }
         mock_load_config.return_value = mock_config
 
@@ -109,7 +119,30 @@ class TestRun(unittest.TestCase):
         # Mock Bazarr client
         mock_bazarr = Mock()
         mock_bazarr.get_wanted_movies.return_value = movies_data
-        mock_bazarr.upload_subtitle_to_bazarr.return_value = True
+        mock_bazarr.upload_movie_subtitle.return_value = True
+        mock_bazarr.get_movie_subtitles.return_value = {
+            "subtitles": [
+                {
+                    "code2": "en",
+                    "forced": False,
+                    "hi": False,
+                    "path": "/path/to/subtitle.srt",
+                }
+            ]
+        }
+        mock_bazarr.sync_subtitle.return_value = True
+        mock_bazarr.trigger_subzero_mods.return_value = True
+        mock_bazarr.get_sync_settings.return_value = {
+            "enabled": True,
+            "max_offset_seconds": 300,
+            "no_fix_framerate": False,
+            "use_gss": False,
+            "reference": "a:0",
+        }
+        mock_bazarr.get_subzero_settings.return_value = {
+            "mods": ["common"],
+            "enabled": True,
+        }
         mock_bazarr_class.return_value = mock_bazarr
 
         # Mock SubSource downloader
@@ -130,7 +163,7 @@ class TestRun(unittest.TestCase):
 
         # Verify subtitle processing
         mock_downloader.get_subtitle_for_movie.assert_called_once()
-        mock_bazarr.upload_subtitle_to_bazarr.assert_called_once_with(
+        mock_bazarr.upload_movie_subtitle.assert_called_once_with(
             123, "/tmp/test.srt", "en", False, False
         )
 
@@ -162,6 +195,14 @@ class TestRun(unittest.TestCase):
         # Mock Bazarr client to return None (API failure)
         mock_bazarr = Mock()
         mock_bazarr.get_wanted_movies.return_value = None
+        mock_bazarr.get_sync_settings.return_value = {
+            "enabled": False,
+            "max_offset_seconds": 300,
+            "no_fix_framerate": False,
+            "use_gss": False,
+            "reference": "a:0",
+        }
+        mock_bazarr.get_subzero_settings.return_value = {"mods": [], "enabled": False}
         mock_bazarr_class.return_value = mock_bazarr
 
         # Mock logging
@@ -233,6 +274,7 @@ class TestRun(unittest.TestCase):
             "password": "test_pass",
             "subsource_api_url": "https://api.test.com",
             "download_directory": "/tmp",
+            "episodes_enabled": False,  # Disable episodes for this test
         }
         mock_load_config.return_value = mock_config
 
@@ -251,6 +293,14 @@ class TestRun(unittest.TestCase):
         # Mock Bazarr client
         mock_bazarr = Mock()
         mock_bazarr.get_wanted_movies.return_value = movies_data
+        mock_bazarr.get_sync_settings.return_value = {
+            "enabled": False,
+            "max_offset_seconds": 300,
+            "no_fix_framerate": False,
+            "use_gss": False,
+            "reference": "a:0",
+        }
+        mock_bazarr.get_subzero_settings.return_value = {"mods": [], "enabled": False}
         mock_bazarr_class.return_value = mock_bazarr
 
         # Mock SubSource downloader
@@ -292,6 +342,7 @@ class TestRun(unittest.TestCase):
             "password": "test_pass",
             "subsource_api_url": "https://api.test.com",
             "download_directory": "/tmp",
+            "episodes_enabled": False,  # Disable episodes for this test
         }
         mock_load_config.return_value = mock_config
 
@@ -311,6 +362,14 @@ class TestRun(unittest.TestCase):
         # Mock Bazarr client
         mock_bazarr = Mock()
         mock_bazarr.get_wanted_movies.return_value = movies_data
+        mock_bazarr.get_sync_settings.return_value = {
+            "enabled": False,
+            "max_offset_seconds": 300,
+            "no_fix_framerate": False,
+            "use_gss": False,
+            "reference": "a:0",
+        }
+        mock_bazarr.get_subzero_settings.return_value = {"mods": [], "enabled": False}
         mock_bazarr_class.return_value = mock_bazarr
 
         # Mock SubSource downloader to return no files
