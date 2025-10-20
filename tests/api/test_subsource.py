@@ -47,7 +47,7 @@ class TestSubSourceDownloader(unittest.TestCase):
         # Check session headers
         expected_headers = {
             "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " "AppleWebKit/537.36"
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
             ),
             "Accept": "application/json",
             "Content-Type": "application/json",
@@ -381,6 +381,137 @@ class TestSubSourceDownloader(unittest.TestCase):
 
             self.assertEqual(len(downloaded_files), 0)
             self.assertEqual(skipped_count, 1)
+
+    # TV Series / Episode tests
+
+    def test_generate_episode_search_queries(self):
+        """Test generation of episode search queries."""
+        episode = {
+            "seriesTitle": "Breaking Bad",
+            "title": "Pilot",
+            "season": 1,
+            "episode": 1,
+            "sceneName": "Breaking.Bad.S01E01.1080p.BluRay.x264-REWARD",
+        }
+
+        queries = self.downloader._generate_episode_search_queries(episode)
+
+        self.assertEqual(len(queries), 4)
+        self.assertIn("Breaking Bad S01E01", queries)
+        self.assertIn("Breaking Bad Pilot", queries)
+        self.assertIn("Breaking Bad", queries)
+
+    def test_generate_episode_search_queries_minimal(self):
+        """Test query generation with minimal episode data."""
+        episode = {"seriesTitle": "Test Show"}
+
+        queries = self.downloader._generate_episode_search_queries(episode)
+
+        self.assertEqual(queries, ["Test Show"])
+
+    def test_extract_episode_info_s01e01_format(self):
+        """Test episode info extraction from S01E01 format."""
+        subtitle = {"release_info": "Breaking.Bad.S01E01.720p.BluRay.x264-REWARD"}
+
+        season, episode = self.downloader._extract_episode_info_from_subtitle(subtitle)
+
+        self.assertEqual(season, 1)
+        self.assertEqual(episode, 1)
+
+    def test_extract_episode_info_1x01_format(self):
+        """Test episode info extraction from 1x01 format."""
+        subtitle = {"release_info": "Breaking.Bad.1x01.720p.BluRay.x264-REWARD"}
+
+        season, episode = self.downloader._extract_episode_info_from_subtitle(subtitle)
+
+        self.assertEqual(season, 1)
+        self.assertEqual(episode, 1)
+
+    def test_extract_episode_info_no_match(self):
+        """Test episode info extraction when no pattern matches."""
+        subtitle = {"release_info": "Breaking.Bad.720p.BluRay.x264-REWARD"}
+
+        season, episode = self.downloader._extract_episode_info_from_subtitle(subtitle)
+
+        self.assertIsNone(season)
+        self.assertIsNone(episode)
+
+    def test_is_subtitle_match_success(self):
+        """Test subtitle matching with correct season/episode."""
+        subtitle = {"release_info": "Breaking.Bad.S01E01.720p.BluRay.x264-REWARD"}
+        target_episode = {"season": 1, "episode": 1}
+
+        result = self.downloader._is_subtitle_match(subtitle, target_episode)
+
+        self.assertTrue(result)
+
+    def test_is_subtitle_match_failure(self):
+        """Test subtitle matching with wrong season/episode."""
+        subtitle = {"release_info": "Breaking.Bad.S01E02.720p.BluRay.x264-REWARD"}
+        target_episode = {"season": 1, "episode": 1}
+
+        result = self.downloader._is_subtitle_match(subtitle, target_episode)
+
+        self.assertFalse(result)
+
+    @patch("api.subsource.requests.Session.post")
+    @patch("api.subsource.requests.Session.get")
+    def test_search_episode_subtitles_success(self, mock_get, mock_post):
+        """Test successful episode subtitle search."""
+        # Mock search response
+        mock_search_response = Mock()
+        mock_search_response.json.return_value = {
+            "results": [
+                {
+                    "title": "Breaking Bad",
+                    "link": "/subtitles/breaking-bad-2008",
+                }
+            ]
+        }
+        mock_search_response.raise_for_status.return_value = None
+        mock_post.return_value = mock_search_response
+
+        # Mock subtitles response
+        mock_sub_response = Mock()
+        mock_sub_response.json.return_value = [
+            {
+                "id": "123",
+                "release_info": "Breaking.Bad.S01E01.720p.BluRay.x264-REWARD",
+                "language": "english",
+            }
+        ]
+        mock_sub_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_sub_response
+
+        episode = {
+            "seriesTitle": "Breaking Bad",
+            "season": 1,
+            "episode": 1,
+        }
+
+        results = self.downloader.search_episode_subtitles(episode, "english")
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], "123")
+        self.assertIn("source_query", results[0])
+
+    @patch("api.subsource.requests.Session.post")
+    def test_search_episode_subtitles_no_results(self, mock_post):
+        """Test episode subtitle search with no results."""
+        mock_response = Mock()
+        mock_response.json.return_value = {"results": []}
+        mock_response.raise_for_status.return_value = None
+        mock_post.return_value = mock_response
+
+        episode = {
+            "seriesTitle": "Unknown Show",
+            "season": 1,
+            "episode": 1,
+        }
+
+        results = self.downloader.search_episode_subtitles(episode, "english")
+
+        self.assertEqual(len(results), 0)
 
 
 if __name__ == "__main__":

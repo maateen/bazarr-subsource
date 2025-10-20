@@ -44,6 +44,13 @@ def load_config():
             "password": config.get("auth", "password"),
             "subsource_api_url": config.get("subsource", "api_url"),
             "download_directory": config.get("download", "directory"),
+            "movies_enabled": config.getboolean("movies", "enabled", fallback=True),
+            "episodes_enabled": config.getboolean("episodes", "enabled", fallback=True),
+            "episodes_search_patterns": config.get(
+                "episodes",
+                "search_patterns",
+                fallback="season_episode,episode_title,scene_name",
+            ),
             "log_level": config.get("logging", "level", fallback="INFO"),
             "log_file": config.get("logging", "file", fallback="bazarr_subsource.log"),
         }
@@ -71,6 +78,13 @@ def create_default_config(config_file: Path):
 
     config["download"] = {"directory": "/tmp/downloaded_subtitles"}
 
+    config["movies"] = {"enabled": "true"}
+
+    config["episodes"] = {
+        "enabled": "true",
+        "search_patterns": "season_episode,episode_title,scene_name",
+    }
+
     config["logging"] = {"level": "INFO", "file": "/var/log/bazarr_subsource.log"}
 
     with open(config_file, "w") as f:
@@ -90,7 +104,7 @@ def create_default_config(config_file: Path):
             "in front of Bazarr\n"
         )
         f.write(
-            "# Leave empty or remove this section if connecting " "directly to Bazarr\n"
+            "# Leave empty or remove this section if connecting directly to Bazarr\n"
         )
         f.write("username = your_username\n")
         f.write("password = your_password\n\n")
@@ -101,6 +115,16 @@ def create_default_config(config_file: Path):
 
         f.write("[download]\n")
         f.write("directory = /tmp/downloaded_subtitles\n\n")
+
+        f.write("[movies]\n")
+        f.write("# Enable movie subtitle downloads\n")
+        f.write("enabled = true\n\n")
+
+        f.write("[episodes]\n")
+        f.write("# Enable TV series episode subtitle downloads\n")
+        f.write("enabled = true\n")
+        f.write("# Search patterns: season_episode,episode_title,scene_name\n")
+        f.write("search_patterns = season_episode,episode_title,scene_name\n\n")
 
         f.write("[logging]\n")
         f.write("level = INFO\n")
@@ -128,7 +152,10 @@ def setup_logging(log_level: str, log_file: str):
 
     # Rotating file handler - 10MB max, keep 5 old files
     file_handler = logging.handlers.RotatingFileHandler(
-        log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"  # 10MB
+        log_file,
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",  # 10MB
     )
     file_handler.setLevel(level)
     file_handler.setFormatter(detailed_formatter)
