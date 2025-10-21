@@ -576,15 +576,7 @@ class SubSourceDownloader:
         """
         release_info = subtitle.get("release_info", "")
 
-        # Look for E01 pattern (simplified)
-        episode_match = re.search(r"[Ee](\d+)", release_info)
-        if episode_match:
-            episode = int(episode_match.group(1))
-            # For E01 format, we don't extract season from the subtitle
-            # We rely on the season context from the search
-            return None, episode
-
-        # Fallback: Look for S01E01 pattern for compatibility
+        # First, look for S01E01 pattern (most specific)
         season_episode_match = re.search(r"[Ss](\d+)[Ee](\d+)", release_info)
         if season_episode_match:
             season = int(season_episode_match.group(1))
@@ -597,6 +589,14 @@ class SubSourceDownloader:
             season = int(alt_pattern.group(1))
             episode = int(alt_pattern.group(2))
             return season, episode
+
+        # Fallback: Look for standalone E01 pattern (least specific)
+        episode_match = re.search(r"[Ee](\d+)", release_info)
+        if episode_match:
+            episode = int(episode_match.group(1))
+            # For E01 format, we don't extract season from the subtitle
+            # We rely on the season context from the search
+            return None, episode
 
         return None, None
 
@@ -758,7 +758,9 @@ class SubSourceDownloader:
             True if subtitle matches episode
         """
         target_season = target_episode.get("season")
-        target_episode_num = target_episode.get("episode")
+        target_episode_num = target_episode.get("episode_number") or target_episode.get(
+            "episode"
+        )
 
         if not target_season or not target_episode_num:
             return False

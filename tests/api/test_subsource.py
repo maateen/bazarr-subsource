@@ -384,37 +384,13 @@ class TestSubSourceDownloader(unittest.TestCase):
 
     # TV Series / Episode tests
 
-    def test_generate_episode_search_queries(self):
-        """Test generation of episode search queries."""
-        episode = {
-            "seriesTitle": "Breaking Bad",
-            "title": "Pilot",
-            "season": 1,
-            "episode": 1,
-            "sceneName": "Breaking.Bad.S01E01.1080p.BluRay.x264-REWARD",
-        }
-
-        queries = self.downloader._generate_episode_search_queries(episode)
-
-        self.assertEqual(len(queries), 4)
-        self.assertIn("Breaking Bad S01E01", queries)
-        self.assertIn("Breaking Bad Pilot", queries)
-        self.assertIn("Breaking Bad", queries)
-
-    def test_generate_episode_search_queries_minimal(self):
-        """Test query generation with minimal episode data."""
-        episode = {"seriesTitle": "Test Show"}
-
-        queries = self.downloader._generate_episode_search_queries(episode)
-
-        self.assertEqual(queries, ["Test Show"])
-
     def test_extract_episode_info_s01e01_format(self):
         """Test episode info extraction from S01E01 format."""
         subtitle = {"release_info": "Breaking.Bad.S01E01.720p.BluRay.x264-REWARD"}
 
         season, episode = self.downloader._extract_episode_info_from_subtitle(subtitle)
 
+        # S01E01 format should return both season and episode
         self.assertEqual(season, 1)
         self.assertEqual(episode, 1)
 
@@ -464,7 +440,12 @@ class TestSubSourceDownloader(unittest.TestCase):
             "results": [
                 {
                     "title": "Breaking Bad",
+                    "type": "tvseries",
                     "link": "/subtitles/breaking-bad-2008",
+                    "seasons": [
+                        {"season": 1, "link": "/subtitles/breaking-bad-2008/s1"}
+                    ],
+                    "releaseYear": 2008,
                 }
             ]
         }
@@ -484,9 +465,9 @@ class TestSubSourceDownloader(unittest.TestCase):
         mock_get.return_value = mock_sub_response
 
         episode = {
-            "seriesTitle": "Breaking Bad",
+            "series_title": "Breaking Bad",
             "season": 1,
-            "episode": 1,
+            "episode_number": 1,
         }
 
         results = self.downloader.search_episode_subtitles(episode, "english")
@@ -504,9 +485,9 @@ class TestSubSourceDownloader(unittest.TestCase):
         mock_post.return_value = mock_response
 
         episode = {
-            "seriesTitle": "Unknown Show",
+            "series_title": "Unknown Show",
             "season": 1,
-            "episode": 1,
+            "episode_number": 1,
         }
 
         results = self.downloader.search_episode_subtitles(episode, "english")

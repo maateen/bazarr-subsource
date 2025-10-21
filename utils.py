@@ -21,6 +21,20 @@ def format_movie_info(movie: Dict) -> str:
     title = movie.get("title", "Unknown Title").strip()
     missing_subs = movie.get("missing_subtitles", [])
 
+    # Get year from multiple possible fields
+    year = (
+        movie.get("year")
+        or movie.get("movie_year")
+        or movie.get("releaseYear")
+        or movie.get("release_year")
+    )
+
+    # Format title with year if available
+    if year:
+        title_with_year = f"{title} ({year})"
+    else:
+        title_with_year = title
+
     # Format missing subtitles languages
     languages = []
     for sub in missing_subs:
@@ -38,7 +52,7 @@ def format_movie_info(movie: Dict) -> str:
 
     missing_langs = ", ".join(languages) if languages else "Unknown"
 
-    return f"• {title} - Missing: {missing_langs}"
+    return f"• {title_with_year} - Missing: {missing_langs}"
 
 
 def format_episode_info(episode: Dict) -> str:
