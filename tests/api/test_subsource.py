@@ -44,14 +44,13 @@ class TestSubSourceDownloader(unittest.TestCase):
         # Check that download directory exists
         self.assertTrue(os.path.exists(self.download_dir))
 
-        # Check session headers
+        # Check session headers (verify Cloudflare bypass headers are present)
         expected_headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-            ),
-            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0",
+            "Accept": "application/json, text/plain, */*",
             "Content-Type": "application/json",
-            "Connection": "keep-alive",
+            "Origin": "https://subsource.net",
+            "Referer": "https://subsource.net/",
         }
         for key, value in expected_headers.items():
             self.assertEqual(self.downloader.session.headers[key], value)

@@ -158,7 +158,7 @@ class TestRun(unittest.TestCase):
 
         # Verify downloader was created
         mock_downloader_class.assert_called_once_with(
-            "https://api.test.com", "/tmp", mock_bazarr
+            "https://api.test.com", "/tmp", mock_bazarr, cf_clearance=None
         )
 
         # Verify subtitle processing

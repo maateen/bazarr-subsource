@@ -20,7 +20,9 @@ logger = logging.getLogger(__name__)
 class SubSourceDownloader:
     """SubSource subtitle downloader."""
 
-    def __init__(self, api_url: str, download_dir: str, bazarr=None):
+    def __init__(
+        self, api_url: str, download_dir: str, bazarr=None, cf_clearance: str = None
+    ):
         self.api_url = api_url
         self.download_dir = download_dir
         self.session = requests.Session()
@@ -50,11 +52,14 @@ class SubSourceDownloader:
             }
         )
 
-        # Set Cloudflare clearance cookie if available from environment
-        cf_clearance = os.environ.get("SUBSOURCE_CF_CLEARANCE")
-        if cf_clearance:
-            self.session.cookies.set("cf_clearance", cf_clearance)
-            logger.info("Using Cloudflare clearance cookie from environment")
+        # Set Cloudflare clearance cookie (priority: env var > config parameter)
+        cf_clearance_cookie = os.environ.get("SUBSOURCE_CF_CLEARANCE") or cf_clearance
+        if cf_clearance_cookie:
+            self.session.cookies.set("cf_clearance", cf_clearance_cookie)
+            source = (
+                "environment" if os.environ.get("SUBSOURCE_CF_CLEARANCE") else "config"
+            )
+            logger.info(f"Using Cloudflare clearance cookie from {source}")
 
         # Create download directory if it doesn't exist
         os.makedirs(download_dir, exist_ok=True)

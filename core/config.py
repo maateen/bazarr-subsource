@@ -43,6 +43,9 @@ def load_config():
             "username": config.get("auth", "username"),
             "password": config.get("auth", "password"),
             "subsource_api_url": config.get("subsource", "api_url"),
+            "subsource_cf_clearance": config.get(
+                "subsource", "cf_clearance", fallback=""
+            ),
             "download_directory": config.get("download", "directory"),
             "movies_enabled": config.getboolean("movies", "enabled", fallback=True),
             "episodes_enabled": config.getboolean("episodes", "enabled", fallback=True),
@@ -111,7 +114,14 @@ def create_default_config(config_file: Path):
 
         # Write remaining sections
         f.write("[subsource]\n")
-        f.write("api_url = https://api.subsource.net/v1\n\n")
+        f.write("api_url = https://api.subsource.net/v1\n")
+        f.write(
+            "# Cloudflare clearance cookie (get from browser DevTools > Application > Cookies)\n"
+        )
+        f.write(
+            "# Leave empty if not needed or set via SUBSOURCE_CF_CLEARANCE environment variable\n"
+        )
+        f.write("cf_clearance = \n\n")
 
         f.write("[download]\n")
         f.write("directory = /tmp/downloaded_subtitles\n\n")

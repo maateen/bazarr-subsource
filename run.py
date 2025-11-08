@@ -131,6 +131,7 @@ def main():
                 config["subsource_api_url"],
                 config["download_directory"],
                 bazarr,  # Pass Bazarr client for API calls
+                cf_clearance=config.get("subsource_cf_clearance"),
             )
             print(f"Download directory: {config['download_directory']}")
             print("✓ SubSource downloader initialized")
