@@ -29,17 +29,32 @@ class SubSourceDownloader:
         self._search_interval_hours = None
         self._movie_years_cache = {}  # Cache movie years to avoid repeated API calls
 
-        # Setup optimized session headers
+        # Setup optimized session headers with Cloudflare bypass headers
         self.session.headers.update(
             {
-                "Accept": "application/json",
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "en,bn;q=0.9,en-US;q=0.8",
                 "Content-Type": "application/json",
-                "Connection": "keep-alive",
-                "User-Agent": (
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-                ),
+                "Cache-Control": "no-cache",
+                "DNT": "1",
+                "Origin": "https://subsource.net",
+                "Pragma": "no-cache",
+                "Referer": "https://subsource.net/",
+                "Sec-CH-UA": '"Chromium";v="142", "Microsoft Edge";v="142", "Not_A Brand";v="99"',
+                "Sec-CH-UA-Mobile": "?0",
+                "Sec-CH-UA-Platform": '"macOS"',
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "same-site",
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0",
             }
         )
+
+        # Set Cloudflare clearance cookie if available from environment
+        cf_clearance = os.environ.get("SUBSOURCE_CF_CLEARANCE")
+        if cf_clearance:
+            self.session.cookies.set("cf_clearance", cf_clearance)
+            logger.info("Using Cloudflare clearance cookie from environment")
 
         # Create download directory if it doesn't exist
         os.makedirs(download_dir, exist_ok=True)
